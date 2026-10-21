@@ -15,7 +15,7 @@ import unittest
 import numpy as np
 import yaml
 
-import pbudget as pb
+import yaml2budget as pb
 
 
 def write(directory, name, text):
