@@ -1,0 +1,27 @@
+# Throughput budget. Parent CBEs are the product of their children.
+# No `wavelength:` key -> grid is inferred from the overlap of all CSV ranges.
+name: Throughput
+units: ""
+rollup: product
+better: higher
+levels: [Instrument, Subsystem, Element]
+alloc: 0.12
+children:
+  - name: Telescope
+    alloc: 0.70
+    children:
+      - {name: Primary mirror,   cbe: data/al_mgf2_reflectance.csv, notes: Al + MgF2 witness sample}
+      - {name: Secondary mirror, cbe: data/al_mgf2_reflectance.csv}
+      - {name: Central obscuration, cbe: 0.88, notes: geometric}
+  - name: Spectrometer
+    alloc: 0.40
+    children:
+      - {name: Slit,          cbe: 0.95, notes: slit loss for nominal PSF}
+      - {name: Collimator,    cbe: data/al_mgf2_reflectance.csv}
+      - {name: Grating,       cbe: data/grating_efficiency.csv, alloc: 0.55, notes: "vendor model, 1st order"}
+      - {name: Camera optics, cbe: data/camera_transmission.csv}
+  - name: Detector
+    alloc: 0.55
+    children:
+      - {name: Window,  cbe: 0.98}
+      - {name: QE,      cbe: data/detector_qe.csv, notes: vendor typical}

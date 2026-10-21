@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Performance Budgets</title>
+<!--SCRIPTS-->
+<style id="pbstyle">
+/* Color tokens: light, then dark (follows OS). Series slots s1-s8 are a CVD-checked categorical order. */
+:root {
+  color-scheme: light;
+  --bg: #f6f6f4; --surface: #fcfcfb; --surface2: #f0efec; --line: #dddcd7; --grid: #e8e7e3;
+  --ink: #0b0b0b; --ink2: #52514e; --ink3: #8a8983; --accent: #2a78d6;
+  --ok: #0ca30c; --low: #c98500; --bad: #d03b3b;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  color-scheme: dark;
+  --bg: #111110; --surface: #1a1a19; --surface2: #242422; --line: #3a3936; --grid: #2c2c2a;
+  --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8a8983; --accent: #3987e5;
+  --ok: #0ca30c; --low: #fab219; --bad: #e66767;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110; --surface: #1a1a19; --surface2: #242422; --line: #3a3936; --grid: #2c2c2a;
+  --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8a8983; --accent: #3987e5;
+  --ok: #0ca30c; --low: #fab219; --bad: #e66767;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-text-size-adjust: 100%; }
+header, nav, main { max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 24px; padding-top: 20px; }
+h1 { font-size: 20px; margin: 0; }
+.summary { color: var(--ink2); font-variant-numeric: tabular-nums; }
+.summary b { color: var(--ink); }
+nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-block: 12px;
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(8px); }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: auto; }
+.group { display: inline-flex; align-items: center; gap: 6px; }
+.group .label { color: var(--ink3); font-size: 12px; }
+.btn.icon { width: 34px; text-align: center; padding: 6px 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button, .btn { font: inherit; color: var(--ink2); background: var(--surface); border: 0; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg button:disabled { opacity: .4; cursor: default; }
+.btn { border: 1px solid var(--line); border-radius: 8px; }
+.btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.wl { display: flex; align-items: center; gap: 10px; flex: 1 1 280px; }
+.wl input { flex: 1; accent-color: var(--accent); }
+.wl .end { color: var(--ink3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.wl output { min-width: 7ch; font-variant-numeric: tabular-nums; font-weight: 600; }
+main { padding-block: 16px 40px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.seg button:hover:not(:disabled), .btn:hover { background: var(--surface2); color: var(--ink); }
+.seg button[aria-pressed="true"]:hover, .btn[aria-pressed="true"]:hover { background: var(--ink); color: var(--bg); }
+.seg button, .btn { transition: background .12s ease, color .12s ease; }
+.view { background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  overflow: auto; min-height: 220px; }
+/* table */
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--grid); }
+th { position: sticky; top: 0; background: var(--surface2); color: var(--ink2); font-weight: 600; font-size: 12px; z-index: 1; }
+td.num, th.num { text-align: right; }
+td.g { width: 18px; border-left: 2px solid var(--line); border-bottom: 0; padding: 0; }
+tr.roll td:not(.g) { background: var(--surface2); font-weight: 600; }
+tbody tr:hover td:not(.g) { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+tbody tr:last-child td { border-bottom: 0; }
+tr.d0 td { font-size: 15px; }
+td.notes { color: var(--ink2); white-space: normal; min-width: 180px; }
+.op { color: var(--ink3); font-weight: 400; }
+.tog { font: inherit; background: none; border: 0; color: var(--ink3); cursor: pointer; width: 18px; padding: 0; }
+.ok { color: var(--ok); } .low { color: var(--low); } .bad { color: var(--bad); } .na { color: var(--ink3); }
+svg.spark { display: block; }
+.spark .c { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.spark .a { fill: none; stroke: var(--ink3); stroke-width: 1; stroke-dasharray: 3 2; }
+.cursor { stroke: var(--ink2); stroke-width: 1; }
+/* flow */
+#flow svg { display: block; margin: 16px; }
+.edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
+.node { cursor: pointer; }
+.node rect.card { fill: var(--surface); stroke: var(--line); }
+.node:hover rect.card { stroke: var(--ink3); }
+.node.roll rect.card { fill: var(--surface2); }
+.node rect.bar { fill: currentColor; }
+.node text { fill: var(--ink2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.node text.name { fill: var(--ink); font-weight: 600; font-size: 13px; }
+.node text.st { fill: currentColor; font-weight: 600; }
+.badge rect { fill: var(--surface); stroke: var(--ink3); }
+.badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; dominant-baseline: central; }
+.more { fill: var(--ink3); font-size: 11px; }
+#plot { height: min(70vh, 640px); min-height: 380px; }
+#desc { flex-basis: 100%; color: var(--ink2); }
+#desc summary { cursor: pointer; font-size: 12px; }
+#desc pre { white-space: pre-wrap; font-size: 12px; margin: 8px 0 0; }
+th code { font-weight: 600; }
+td.x { color: var(--ink2); font-weight: 400 !important; }
+.xv { width: max-content; max-width: 280px; white-space: normal; overflow-wrap: anywhere; }
+.xv summary { cursor: pointer; }
+.xv div { white-space: pre-line; font-size: 12px; margin-top: 4px; }
+.cols { position: relative; }
+.cols summary { list-style: none; }
+.cols div { position: absolute; z-index: 5; top: 110%; left: 0; min-width: 200px; max-height: 60vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; box-shadow: 0 4px 16px #0002; }
+.cols label { display: flex; gap: 6px; padding: 2px 4px; white-space: nowrap; }
+.hint { color: var(--ink3); font-size: 12px; margin: 8px 2px; }
+/* Phones: everything below only applies at <=640px; the desktop layout is unchanged. */
+@media (max-width: 640px) {
+  header { padding-top: 12px; gap: 4px 12px; }
+  h1 { font-size: 17px; }
+  .summary { font-size: 12px; }
+  nav { gap: 8px; padding-block: 8px; }
+  .seg button, .btn { padding: 5px 9px; font-size: 13px; }
+  .btn.icon { width: 30px; }
+  .tools { margin-left: 0; gap: 6px; }
+  .wl { order: 3; flex-basis: 100%; }             /* the slider gets its own full-width row */
+  .wl .end, .group .label, .hint { display: none; }
+  main { padding-block: 10px 24px; }
+  th, td { padding: 5px 7px; }
+  .xv, td.notes { max-width: 200px; }
+  #flow { max-height: 72vh; }                     /* pan inside the diagram, not the page */
+  #flow svg { margin: 8px; }
+  #table { max-height: 76vh; }
+  #plot { height: 60vh; min-height: 300px; }
+}
+@media print {                                  /* printing the page itself: just the content */
+  nav, .hint, #desc { display: none; }
+  .view { border: 0; overflow: visible; }
+  body { background: #fff; }
+}
+</style>
+</head>
+<body>
+<header><h1 id="title"></h1><div class="summary" id="summary"></div>
+  <details id="desc"><summary>About this budget</summary><pre></pre></details></header>
+<nav>
+  <div class="seg" id="budgets"></div>
+  <div class="seg" id="views">
+    <button data-v="table">Table</button><button data-v="flow">Flowchart</button><button data-v="plot">Spectrum</button>
+  </div>
+  <label class="wl" id="wl">λ <span class="end" id="wlLo"></span>
+    <input type="range" id="slider" min="0" value="0" aria-label="wavelength">
+    <span class="end" id="wlHi"></span><output id="wlv"></output></label>
+  <div class="tools">
+    <button class="btn" id="logy" aria-pressed="false" title="Logarithmic y axis">Log y</button>
+    <details class="cols" id="cols"><summary class="btn" title="Show or hide extra columns">Columns ▾</summary><div></div></details>
+    <button class="btn" id="expand" title="Expand every subsystem">Expand</button>
+    <button class="btn" id="collapse" title="Collapse every subsystem">Collapse</button>
+    <span class="group" id="exports"><span class="label">Export</span>
+      <button class="btn" id="exYaml" title="Values at the current λ, in the input schema">YAML</button>
+      <button class="btn" id="exXlsx" title="Formatted workbook of the table (and the full band)">Excel</button>
+      <button class="btn" id="exPdf" title="Vector PDF of this view">PDF</button>
+      <button class="btn" id="exPng" title="2× PNG of the plot">PNG</button></span>
+    <button class="btn icon" id="theme" title="Theme"></button>
+  </div>
+</nav>
+<main>
+  <div class="view" id="table"></div>
+  <div class="view" id="flow"></div>
+  <div class="view" id="plot"></div>
+  <p class="hint" id="hint"></p>
+</main>
+<script>
+const BUDGETS = /*DATA*/;
+const OPS = {product: ['×', 'product'], rss: ['√Σ²', 'RSS'], sum: ['Σ', 'sum'],
+             inverse_rss: ['1/RSS', 'inverse RSS']};
+const badgeWidth = node => node.kids.length ? Math.max(24, 10 + 6.4 * OPS[node.op][0].length) : 0;
+const S = {b: 0, i: 0, view: 'table', theme: 'auto', closed: BUDGETS.map(() => new Set()), hide: BUDGETS.map(() => new Set())};
+try { S.theme = localStorage.getItem('pb-theme') || 'auto'; } catch {}   // per-viewer, optional
+const $ = s => document.querySelector(s);
+const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+const esc = s => String(s).replace(/[&<>"]/g, c => `&#${c.charCodeAt(0)};`);
+const B = () => BUDGETS[S.b];
+const PHONE = matchMedia('(max-width: 640px)');
+const narrow = () => PHONE.matches;
+
+// Derived tree info: children lists, top-level branch (drives plot color), sibling index (drives dash).
+for (const b of BUDGETS) {
+  b.nodes.forEach(n => n.kids = []);
+  b.nodes.forEach((n, i) => {
+    if (n.parent == null) return;
+    const p = b.nodes[n.parent];
+    n.sib = p.kids.push(i) - 1;
+    n.branch = n.depth === 1 ? n.sib : p.branch;
+  });
+}
+
+// Values: vectors are indexed at wavelength j, scalars are constant.
+const at = (v, j = S.i) => Array.isArray(v) ? v[j] : v;
+const fmt = x => x == null ? '–' : (x !== 0 && (Math.abs(x) >= 1e5 || Math.abs(x) < 1e-3)) ? x.toExponential(2) : String(+x.toPrecision(4));
+const pct = m => m == null ? '–' : (m >= 0 ? '+' : '−') + Math.abs(100 * m).toFixed(1) + '%';
+const isVec = n => Array.isArray(n.cbe) || Array.isArray(n.alloc);
+// Margin is the fraction of the allocation left over (positive = meets allocation).
+function margin(n, j = S.i) {
+  if (n.alloc == null) return null;
+  const c = at(n.cbe, j), a = at(n.alloc, j);
+  return B().better === 'higher' ? c / a - 1 : 1 - c / a;
+}
+// Worst margin over the grid: [margin, index].
+function worst(n) {
+  if (n.alloc == null || !B().grid) return [null, 0];
+  return B().grid.reduce((w, _, j) => { const m = margin(n, j); return m < w[0] ? [m, j] : w; }, [Infinity, 0]);
+}
+// Margin as a difference, in budget units (positive = allocation not used up).
+const diff = (n, j = S.i) => n.alloc == null ? null
+  : B().better === 'higher' ? at(n.cbe, j) - at(n.alloc, j) : at(n.alloc, j) - at(n.cbe, j);
+const signed = d => (d >= 0 ? '+' : '−') + fmt(Math.abs(d));
+const status = m => m == null ? ['na', ''] : m < 0 ? ['bad', '✕'] : m < B().warn ? ['low', '▲'] : ['ok', '✓'];
+const mcell = (m, d) => { const [c, ic] = status(m);
+  return `<span class="${c}">${ic} ${pct(m)}</span>${d == null ? '' : ` <span class="op">${signed(d)}</span>`}`; };
+const hidden = n => { for (let p = n.parent; p != null; p = B().nodes[p].parent) if (S.closed[S.b].has(p)) return true; return false; };
+const toggle = i => { const c = S.closed[S.b]; c.has(i) ? c.delete(i) : c.add(i); render(); };
+const wlText = j => B().grid ? `${fmt(B().grid[j])} ${B().wl_units}` : '';
+
+function spark(n, W = 96, H = 22, attrs = '') {
+  const g = B().grid;
+  const ys = [n.cbe, n.alloc].filter(v => v != null).flatMap(v => g.map((_, j) => at(v, j)));
+  const lo = Math.min(...ys), hi = Math.max(...ys);
+  const X = j => (j / (g.length - 1) * W).toFixed(1), Y = v => (H - 2 - (v - lo) / (hi - lo || 1) * (H - 4)).toFixed(1);
+  const line = (v, c) => v == null ? '' : `<polyline class="${c}" points="${g.map((_, j) => X(j) + ',' + Y(at(v, j))).join(' ')}"/>`;
+  return `<svg class="spark" ${attrs} width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`
+    + `${line(n.alloc, 'a')}${line(n.cbe, 'c')}<line class="cursor" x1="${X(S.i)}" x2="${X(S.i)}" y2="${H}"/></svg>`;
+}
+
+// Extra YAML keys: numbers formatted, long or multi-line text collapsed behind its first line.
+function xcell(v) {
+  if (v == null) return '<td class="x"></td>';
+  if (typeof v === 'number') return `<td class="x num">${fmt(v)}</td>`;
+  const s = String(v).trim(), first = s.split('\n')[0];
+  return s.includes('\n') || s.length > 60
+    ? `<td class="x"><details class="xv"><summary>${esc(first.slice(0, 40))}…</summary><div>${esc(s)}</div></details></td>`
+    : `<td class="x"><div class="xv">${esc(s)}</div></td>`;
+}
+
+function renderTable() {
+  const b = B(), depth = Math.max(...b.nodes.map(n => n.depth)) + 1, vec = !!b.grid;
+  const u = b.units ? ` [${esc(b.units)}]` : '', L = narrow() ? 1 : depth;   // one indented column on a phone
+  const cols = b.columns.filter(k => !S.hide[S.b].has(k));
+  const head = [...Array(L)].map((_, d) => `<th>${esc(narrow() ? b.levels[0] ?? 'Item' : b.levels[d] ?? 'Level ' + d)}</th>`).join('')
+    + (narrow() ? '' : '<th>Roll-up</th>') + `<th class="num">CBE${u}</th><th class="num">Alloc${u}</th><th class="num">Margin (% · Δ${u})</th>`
+    + (vec ? '<th class="num">Worst in band</th><th>CBE vs λ</th>' : '')
+    + '<th>Notes</th>' + cols.map(k => `<th><code>${esc(k)}</code></th>`).join('');
+  const rows = b.nodes.map((n, i) => {
+    if (hidden(n)) return '';
+    const tog = n.kids.length ? `<button class="tog" data-i="${i}">${S.closed[S.b].has(i) ? '▸' : '▾'}</button>` : '<span class="tog"></span>';
+    const [wm, wj] = worst(n);
+    const name = narrow()
+      ? `<td style="padding-left:${6 + n.depth * 14}px">${tog}${esc(n.name)}</td>`
+      : '<td class="g"></td>'.repeat(n.depth) + `<td colspan="${L - n.depth}">${tog}${esc(n.name)}</td>`;
+    return `<tr class="d${n.depth}${n.kids.length ? ' roll' : ''}">` + name
+      + (narrow() ? '' : `<td class="op">${n.op ? esc(OPS[n.op][1]) : ''}</td>`)
+      + `<td class="num">${fmt(at(n.cbe))}</td><td class="num">${fmt(at(n.alloc))}</td><td class="num">${mcell(margin(n), diff(n))}</td>`
+      + (vec ? `<td class="num">${wm == null ? '–' : mcell(wm, diff(n, wj)) + ` <span class="op">@ ${wlText(wj)}</span>`}</td><td>${isVec(n) ? spark(n) : '<span class="op">const</span>'}</td>` : '')
+      + `<td class="notes">${esc(n.notes)}</td>` + cols.map(k => xcell(n.extra[k])).join('') + '</tr>';
+  }).join('');
+  $('#table').innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+// Left-to-right tidy tree: leaves (or collapsed nodes) take successive rows; parents center on their children.
+function renderFlow() {
+  const b = B(), W = 260, H = 74, GX = 72, GY = 12, pos = {};
+  let y = 0;
+  (function place(i) {
+    const n = b.nodes[i], x = n.depth * (W + GX);
+    if (n.kids.length && !S.closed[S.b].has(i)) {
+      n.kids.forEach(place);
+      pos[i] = {x, y: (pos[n.kids[0]].y + pos[n.kids.at(-1)].y) / 2};
+    } else { pos[i] = {x, y}; y += H + GY; }
+  })(0);
+  const ids = Object.keys(pos).map(Number), w = Math.max(...ids.map(i => pos[i].x)) + W + 4;
+  const edges = ids.filter(i => b.nodes[i].parent != null).map(i => {
+    const parent = b.nodes[b.nodes[i].parent], p = pos[b.nodes[i].parent], c = pos[i];
+    const x1 = p.x + W + 14 + badgeWidth(parent) / 2, y1 = p.y + H / 2;
+    const x2 = c.x, y2 = c.y + H / 2, xm = (x1 + x2) / 2;
+    return `<path class="edge" d="M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}"/>`;
+  }).join('');
+  const nodes = ids.map(i => {
+    const n = b.nodes[i], {x, y: yy} = pos[i], m = margin(n), [cls, ic] = status(m), closed = S.closed[S.b].has(i);
+    const wide = !isVec(n) && n.alloc == null, lim = wide ? 32 : 20;   // leave room for the sparkline / bar
+    const name = n.name.length > lim ? n.name.slice(0, lim - 1) + '…' : n.name;
+    const frac = n.alloc == null ? 0 : Math.max(0, Math.min(1, b.better === 'higher' ? at(n.alloc) / at(n.cbe) : at(n.cbe) / at(n.alloc)));
+    return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${yy})"><title>${esc([n.name, n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
+      + `<rect class="card" width="${W}" height="${H}" rx="10"/>`
+      + `<text class="name" x="12" y="22">${esc(name)}</text>`
+      + `<text x="12" y="41">CBE ${fmt(at(n.cbe))}${n.alloc != null ? ' / ' + fmt(at(n.alloc)) : ''} ${esc(b.units)}</text>`
+      + `<text class="st" x="12" y="62">${ic} ${n.alloc != null ? pct(m) + ' · ' + signed(diff(n)) : ''}</text>`
+      + (isVec(n) ? spark(n, 88, 26, `x="${W - 100}" y="18"`) : '')
+      + (n.alloc != null ? `<rect x="${W - 100}" y="56" width="88" height="4" rx="2" fill="var(--grid)"/><rect class="bar" x="${W - 100}" y="56" width="${(88 * frac).toFixed(1)}" height="4" rx="2"/>` : '')
+      + (n.kids.length ? `<g class="badge" transform="translate(${W + 12},${H / 2})">`
+          + `<rect x="${-badgeWidth(n) / 2}" y="-11" width="${badgeWidth(n)}" height="22" rx="11"/>`
+          + `<text>${esc(OPS[n.op][0])}</text></g>` : '')
+      + (closed ? `<text class="more" x="${W - 12}" y="22" text-anchor="end">+${n.kids.length}</text>` : '')
+      + '</g>';
+  }).join('');
+  $('#flow').innerHTML = `<svg width="${w}" height="${y}" viewBox="0 0 ${w} ${y}">${edges}${nodes}</svg>`;
+  if (narrow()) {                                // a phone either fits the diagram on screen,
+    const view = $('#flow'), room = view.clientWidth - 16;   // or opens it at the root card
+    if (room / w >= 0.6) {
+      const svg = view.querySelector('svg');
+      svg.setAttribute('width', room);
+      svg.setAttribute('height', Math.round(y * room / w));
+    } else {
+      view.scrollTop = Math.max(0, pos[0].y - 24);
+      view.scrollLeft = 0;
+    }
+  }
+}
+
+function renderPlot() {
+  const b = B(), el = $('#plot'), colors = [1, 2, 3, 4, 5, 6, 7, 8].map(k => css('--s' + k));
+  const dashes = ['dot', 'dash', 'longdash', 'dashdot', 'longdashdot', 'solid'];
+  const series = v => b.grid.map((_, j) => at(v, j));
+  const traces = b.nodes.flatMap((n, i) => {
+    const root = i === 0, color = root ? css('--ink') : colors[n.branch % 8];
+    const group = {legendgroup: root ? 'root' : 'g' + n.branch, legendgrouptitle: {text: root ? 'Total' : b.nodes[b.nodes[0].kids[n.branch]].name}};
+    const t = [{...group, x: b.grid, y: series(n.cbe), name: n.name + (n.kids.length && !root ? ' (roll-up)' : ''),
+      line: {color, width: root ? 3.5 : n.kids.length ? 2.5 : 1.5, dash: n.kids.length || root ? 'solid' : dashes[n.sib % 6]},
+      hovertemplate: `%{y:.4g}`}];
+    if (n.alloc != null) t.push({...group, x: b.grid, y: series(n.alloc), name: n.name + ' alloc', visible: root || 'legendonly',
+      line: {color, width: 1.5, dash: 'dash'}, hovertemplate: `%{y:.4g}`});
+    return t;
+  });
+  const axis = {gridcolor: css('--grid'), zerolinecolor: css('--line'), linecolor: css('--line')};
+  const x = b.grid[S.i];
+  return Plotly.react(el, traces, {
+    paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {family: 'system-ui, sans-serif', color: css('--ink2'), size: 12},
+    margin: narrow() ? {l: 46, r: 10, t: 8, b: 52} : {l: 64, r: 16, t: 16, b: 56},
+    hovermode: 'x unified', hoverlabel: {bgcolor: css('--surface'), bordercolor: css('--line')},
+    xaxis: {...axis, title: {text: `Wavelength [${b.wl_units}]`, standoff: narrow() ? 6 : undefined}},
+    yaxis: {...axis, type: S.log ? 'log' : 'linear',        // the header already names the units
+            title: narrow() ? undefined : {text: b.name + (b.units ? ` [${b.units}]` : '')}},
+    legend: narrow() ? {groupclick: 'toggleitem', orientation: 'h', y: -0.3, yanchor: 'top', x: 0,
+                        font: {size: 10}, tracegroupgap: 6, bgcolor: 'rgba(0,0,0,0)'}
+      : {groupclick: 'toggleitem', tracegroupgap: 12, bgcolor: 'rgba(0,0,0,0)'},
+    shapes: [{type: 'line', x0: x, x1: x, yref: 'paper', y0: 0, y1: 1, line: {color: css('--ink3'), width: 1}}],
+  }, {responsive: true, displaylogo: false, displayModeBar: !narrow()});
+  if (!el._bound) { el._bound = true; el.on('plotly_click', e => setWl(e.points[0].pointIndex)); }
+}
+
+// --- exports -------------------------------------------------------------
+// --- Excel export ------------------------------------------------------------------------
+// An .xlsx is a ZIP of XML parts. ZIP allows stored (uncompressed) entries, so a workbook
+// needs no library: CRC-32 + the three ZIP records below, and OOXML with inline strings.
+const CRC_TABLE = Uint32Array.from({length: 256}, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+const crc32 = bytes => {
+  let c = 0xFFFFFFFF;
+  for (const byte of bytes) c = CRC_TABLE[(c ^ byte) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+};
+const u16 = n => [n & 255, (n >>> 8) & 255];
+const u32 = n => [...u16(n & 0xFFFF), ...u16(n >>> 16)];
+
+function zip(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const nameBytes = enc.encode(name), data = enc.encode(text), crc = crc32(data);
+    const common = [...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0x21),   // v2.0, stored, 1980
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(nameBytes.length), ...u16(0)];
+    parts.push(new Uint8Array([...u32(0x04034b50), ...common]), nameBytes, data);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...common,
+      ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset)]), nameBytes);
+    offset += 30 + nameBytes.length + data.length;
+  }
+  const size = central.reduce((n, part) => n + part.length, 0);
+  return new Blob([...parts, ...central,
+    new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(Object.keys(files).length),
+      ...u16(Object.keys(files).length), ...u32(size), ...u32(offset), ...u16(0)])],
+    {type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+
+const xesc = s => String(s).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+  .replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+const colRef = i => (i < 26 ? '' : String.fromCharCode(64 + Math.floor(i / 26))) + String.fromCharCode(65 + i % 26);
+
+// Style indices into styles.xml below: [plain, title, header, text, number, scientific,
+// margin +, margin −] and the same four value styles again for roll-up rows (bold, shaded).
+const ST = {title: 1, head: 2, text: 3, num: 4, sci: 5, up: 6, down: 7,
+            rollText: 8, rollNum: 9, rollSci: 10, rollUp: 11, rollDown: 12};
+const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="2"><numFmt numFmtId="165" formatCode="0.000E+00"/><numFmt numFmtId="166" formatCode="+0.0%;-0.0%"/></numFmts>
+<fonts count="8">
+<font><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>
+<font><sz val="11"/><color rgb="FF0A7A0A"/><name val="Calibri"/></font>
+<font><sz val="11"/><color rgb="FFC0392B"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FF0A7A0A"/><name val="Calibri"/></font>
+<font><b/><sz val="14"/><name val="Calibri"/></font>
+<font><b/><sz val="11"/><color rgb="FFC0392B"/><name val="Calibri"/></font></fonts>
+<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FF3C3C3B"/><bgColor indexed="64"/></patternFill></fill>
+<fill><patternFill patternType="solid"><fgColor rgb="FFF0EFEC"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>
+<border><left/><right/><top/><bottom style="thin"><color rgb="FFBFBFBF"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="13">
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="0" fontId="6" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top"/></xf>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+<xf numFmtId="166" fontId="3" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+<xf numFmtId="166" fontId="4" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+<xf numFmtId="165" fontId="1" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
+<xf numFmtId="166" fontId="5" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
+<xf numFmtId="166" fontId="7" fillId="3" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/>
+</cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+
+// A cell is [value, kind]; kind picks the number format and, on roll-up rows, the bold variant.
+function cellXML(ref, value, kind, roll) {
+  if (value == null || value === '') return '';
+  if (typeof value !== 'number') return `<c r="${ref}" s="${roll ? ST.rollText : ST.text}" t="inlineStr"><is><t xml:space="preserve">${xesc(value)}</t></is></c>`;
+  const small = value !== 0 && (Math.abs(value) < 1e-3 || Math.abs(value) >= 1e5);
+  const style = kind === 'pct' ? (value < 0 ? (roll ? ST.rollDown : ST.down) : (roll ? ST.rollUp : ST.up))
+    : small ? (roll ? ST.rollSci : ST.sci) : (roll ? ST.rollNum : ST.num);
+  return `<c r="${ref}" s="${style}"><v>${value}</v></c>`;
+}
+
+function sheetXML({title, head, rows, widths, freeze = 2}) {
+  const body = [[[title, 'text']], head.map(h => [h, 'head'])].concat(rows.map(r => r.cells))
+    .map((cells, i) => {
+      const roll = i > 1 && rows[i - 2].roll, level = i > 1 ? rows[i - 2].level || 0 : 0;
+      const inner = cells.map(([value, kind], c) =>
+        i === 0 ? cellXML(colRef(c) + '1', value, kind, false).replace(`s="${ST.text}"`, `s="${ST.title}"`)
+        : i === 1 ? `<c r="${colRef(c)}2" s="${ST.head}" t="inlineStr"><is><t>${xesc(value)}</t></is></c>`
+        : cellXML(colRef(c) + (i + 1), value, kind, roll)
+          || (roll ? `<c r="${colRef(c)}${i + 1}" s="${ST.rollText}"/>` : '')).join('');
+      return `<row r="${i + 1}"${level ? ` outlineLevel="${Math.min(level, 7)}"` : ''}${roll ? ' customFormat="1"' : ''}>${inner}</row>`;
+    }).join('');
+  const levels = Math.min(7, Math.max(0, ...rows.map(r => r.level || 0)));
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetPr><outlinePr summaryBelow="0" summaryRight="0"/></sheetPr>
+<sheetViews><sheetView workbookViewId="0"><pane ySplit="${freeze}" topLeftCell="A${freeze + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetFormatPr defaultRowHeight="15" outlineLevelRow="${levels}"/>
+<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')}</cols>
+<sheetData>${body}</sheetData></worksheet>`;
+}
+
+function workbook(sheets) {
+  const names = sheets.map((s, i) => `<sheet name="${xesc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('');
+  const files = {
+    '[Content_Types].xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+    'xl/workbook.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names}</sheets></workbook>`,
+    'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')}
+<Relationship Id="rId${sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    'xl/styles.xml': STYLES,
+  };
+  sheets.forEach((sheet, i) => { files[`xl/worksheets/sheet${i + 1}.xml`] = sheetXML(sheet); });
+  return zip(files);
+}
+
+const sheetName = name => name.replace(/[\\\/?*\[\]:]/g, '-').slice(0, 31) || 'Budget';
+
+function exportXLSX() {
+  const b = B(), unit = b.units ? ` [${b.units}]` : '';
+  const cols = b.columns.filter(k => !S.hide[S.b].has(k));
+  const depth = Math.max(...b.nodes.map(n => n.depth)) + 1;
+  const head = [...Array(depth)].map((_, d) => b.levels[d] ?? `Level ${d}`).concat(
+    ['Roll-up', `CBE${unit}`, `Alloc${unit}`, 'Margin', `Margin Δ${unit}`],
+    b.grid ? ['Worst in band', `Worst at [${b.wl_units}]`] : [], ['Notes'], cols);
+  const rows = b.nodes.map(n => {
+    const [wm, wj] = worst(n), cells = [...Array(depth)].map(() => ['', 'text']);
+    cells[n.depth] = [n.name, 'text'];
+    cells.push([n.op ? OPS[n.op][1] : '', 'text'], [at(n.cbe), 'num'], [at(n.alloc), 'num'],
+      [margin(n), 'pct'], [diff(n), 'num']);
+    if (b.grid) cells.push([wm, 'pct'], [wm == null ? '' : b.grid[wj], 'num']);
+    cells.push([n.notes, 'text'], ...cols.map(k => [n.extra[k] ?? '', 'text']));
+    return {cells, roll: !!n.kids.length, level: n.depth};
+  });
+  const sheets = [{
+    name: sheetName(b.name), head, rows,
+    title: `${b.name}${b.grid ? ` — λ = ${wlText(S.i)}` : ''}  ·  exported ${new Date().toISOString().slice(0, 10)}`,
+    widths: [...Array(depth).fill(20), 10, 14, 14, 11, 14, ...(b.grid ? [13, 14] : []), 46, ...cols.map(() => 24)],
+  }];
+  if (b.grid) {                                  // second sheet: every term over the full band
+    const paths = b.nodes.map((n, i) => {
+      const parts = [n.name];
+      for (let p = n.parent; p != null; p = b.nodes[p].parent) parts.unshift(b.nodes[p].name);
+      return parts.join(' / ');
+    });
+    sheets.push({
+      name: 'Spectrum', title: `${b.name} vs wavelength`,
+      head: [`Wavelength [${b.wl_units}]`, ...paths],
+      rows: b.grid.map((w, j) => ({cells: [[w, 'num'], ...b.nodes.map(n => [at(n.cbe, j), 'num'])], roll: false, level: 0})),
+      widths: [16, ...b.nodes.map(() => 18)],
+    });
+  }
+  save(workbook(sheets), slug(b.name + (b.grid ? '_' + fmt(b.grid[S.i]) + b.wl_units : '')) + '.xlsx',
+       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+
+const save = (data, name, type) => {
+  const blob = data instanceof Blob ? data : new Blob([data], {type});
+  const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(blob), download: name});
+  a.click(); URL.revokeObjectURL(a.href);
+};
+const slug = t => t.replace(/[^\w.-]+/g, '_');
+
+// jsPDF's built-in faces are Latin-1 only (µ, λ, ✓ … are dropped), so a Unicode face is embedded in
+// the PDF: inlined by --font, else fetched once from the CDN, else the text falls back to ASCII.
+const FONT_CDN = 'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans';
+const MARKS = {'✓ ': '', '✕ ': 'X ', '▲ ': '! ', '−': '-', '–': '-'};   // glyphs no PDF face carries
+const ASCII = {...MARKS, '√Σ²': 'RSS', 'Σ': 'sum', '∏': 'prod', '×': 'x',
+  'µ': 'u', 'λ': 'lambda', 'σ': 'sigma', '·': '-', '→': '->'};
+const sub = (t, map) => Object.entries(map).reduce((s, [k, v]) => s.split(k).join(v), t);
+const b64 = buf => { let s = ''; new Uint8Array(buf).forEach(c => s += String.fromCharCode(c)); return btoa(s); };
+let fontsOnce;
+function pdfFonts() {
+  fontsOnce ??= (window.PB_FONT ? Promise.resolve(window.PB_FONT)
+    : Promise.all(['.ttf', '-Bold.ttf'].map(x => fetch(FONT_CDN + x).then(r => r.arrayBuffer()).then(b64)))
+        .then(([normal, bold]) => ({normal, bold}))).catch(() => null);
+  return fontsOnce;
+}
+
+// svg2pdf follows presentation attributes and inline styles, not stylesheet rules, so a copy of
+// the drawing is made with the computed values baked in.
+const SVG_PROPS = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap', 'opacity',
+  'font-family', 'font-size', 'font-weight', 'text-anchor', 'dominant-baseline'];
+function inlineStyles(src) {
+  const copy = src.cloneNode(true), from = [src, ...src.querySelectorAll('*')], to = [copy, ...copy.querySelectorAll('*')];
+  from.forEach((el, i) => {
+    const cs = getComputedStyle(el);
+    to[i].setAttribute('style', SVG_PROPS.map(p => `${p}:${cs.getPropertyValue(p)}`).join(';'));
+  });
+  return copy;
+}
+
+// Vector PDF, downloaded directly (no print dialog): svg2pdf draws into a jsPDF page of the same size.
+// The drawing is mounted off-screen because svg2pdf measures it in the document.
+async function svgToPDF(svg, w, h, name) {
+  const markup = typeof svg === 'string';
+  if (!window.jspdf?.jsPDF || !window.svg2pdf) return save(markup ? svg : svg.outerHTML, name + '.svg', 'image/svg+xml');
+  const host = document.body.appendChild(Object.assign(document.createElement('div'), {style: 'position:fixed;left:-10000px;top:0'}));
+  if (markup) host.innerHTML = svg; else host.appendChild(inlineStyles(svg));   // Plotly's SVG is already self-contained
+  const pt = 0.75, doc = new jspdf.jsPDF({unit: 'pt', format: [w * pt, h * pt], orientation: w > h ? 'l' : 'p'}), f = await pdfFonts();
+  for (const [style, data] of Object.entries(f || {})) { doc.addFileToVFS(`pb-${style}.ttf`, data); doc.addFont(`pb-${style}.ttf`, 'PB', style); }
+  host.querySelectorAll('*').forEach(el => { if (f) el.style.fontFamily = 'PB'; });
+  const map = f ? MARKS : ASCII;                 // without a Unicode face, fall back to ASCII throughout
+  const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  for (let t; (t = walk.nextNode());) t.nodeValue = sub(t.nodeValue, map);
+  try { await doc.svg(host.firstElementChild, {x: 0, y: 0, width: w * pt, height: h * pt}); doc.save(name + '.pdf'); }
+  finally { host.remove(); }
+}
+
+// Exports are always drawn in light colors (they land on white paper / a transparent PNG).
+function inLight(redraw, use) {
+  const prev = document.documentElement.dataset.theme;
+  document.documentElement.dataset.theme = 'light';
+  const restore = () => { prev ? document.documentElement.dataset.theme = prev : delete document.documentElement.dataset.theme; redraw(); };
+  return Promise.resolve(redraw()).then(use).finally(restore);
+}
+const lightFlow = use => inLight(renderFlow, use);
+const lightPlot = use => inLight(renderPlot, () => {
+  const el = $('#plot'), {width: w, height: h} = el.getBoundingClientRect();
+  return use(el, w, h);
+});
+
+function exportPDF() {
+  const b = B(), tag = slug(b.name + (b.grid ? '_' + fmt(b.grid[S.i]) + b.wl_units : ''));
+  if (S.view === 'flow') return lightFlow(() => {
+    const svg = $('#flow svg');
+    return svgToPDF(svg, +svg.getAttribute('width'), +svg.getAttribute('height'), tag + '_flowchart');
+  });
+  return lightPlot((el, w, h) => Plotly.toImage(el, {format: 'svg', width: w, height: h})
+    .then(url => svgToPDF(decodeURIComponent(url.split(',')[1]), w, h, tag + '_spectrum')));
+}
+
+// Table -> YAML at the current wavelength (JSON.stringify output is valid YAML).
+function exportYAML() {
+  const b = B(), q = v => typeof v === 'number' ? String(+v.toPrecision(6)) : typeof v === 'boolean' ? String(v) : JSON.stringify(String(v));
+  const fields = (n, p) => [['cbe', at(n.cbe)], ['alloc', at(n.alloc)], ['margin', diff(n)], ['margin_frac', margin(n)],
+    ['rollup', n.op], ['notes', n.notes || null], ...Object.entries(n.extra)]
+    .filter(([, v]) => v != null).map(([k, v]) => `${p}${k}: ${q(v)}`);
+  const node = (i, ind, dash) => {
+    const n = b.nodes[i], p = ind + (dash ? '  ' : '');
+    const L = [(dash ? ind + '- ' : ind) + `name: ${q(n.name)}`, ...fields(n, p)];
+    if (n.kids.length) L.push(p + 'children:', ...n.kids.map(k => node(k, p + '  ', true)));
+    return L.join('\n');
+  };
+  const text = [`# pbudget export of ${b.name}` + (b.grid ? ` at ${wlText(S.i)}` : '') + ` (${new Date().toISOString().slice(0, 10)})`,
+    `units: ${q(b.units)}`, `better: ${q(b.better)}`,
+    node(0, '', false), ''].filter(v => v != null).join('\n');
+  save(text, slug(b.name + (b.grid ? '_' + fmt(b.grid[S.i]) + b.wl_units : '')) + '.yaml', 'text/yaml');
+}
+
+function setTheme(t) {
+  S.theme = t;
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('pb-theme', t); } catch {}
+  render();
+}
+
+function renderSummary() {
+  const b = B(), r = b.nodes[0], [wm, wj] = worst(r);
+  $('#title').textContent = b.name;
+  $('#desc').hidden = !b.description; $('#desc pre').textContent = b.description;
+  $('#summary').innerHTML = `CBE <b>${fmt(at(r.cbe))}</b>${r.alloc != null ? ` vs alloc <b>${fmt(at(r.alloc))}</b> ${esc(b.units)} · margin ${mcell(margin(r), diff(r))}` : ''}`
+    + (b.grid ? ` at ${wlText(S.i)}` + (wm != null ? ` · worst ${mcell(wm, diff(r, wj))} at ${wlText(wj)}` : '') : '');
+}
+
+// Which tool belongs to which view.
+const TOOLS = {logy: ['plot'], cols: ['table'], expand: ['table', 'flow'], collapse: ['table', 'flow'],
+  exYaml: ['table'], exXlsx: ['table'], exPdf: ['flow', 'plot'], exPng: ['plot']};
+const THEME_ICON = {auto: '◐', light: '☀', dark: '☾'};
+
+function render() {
+  const b = B();
+  document.querySelectorAll('#budgets button').forEach((e, k) => e.setAttribute('aria-pressed', k === S.b));
+  const offered = b.views.filter(v => v !== 'plot' || b.grid);   // the spectrum needs a grid
+  if (!offered.includes(S.view)) S.view = offered[0];
+  document.querySelectorAll('#views button').forEach(e => {
+    e.hidden = !b.views.includes(e.dataset.v);
+    e.disabled = !offered.includes(e.dataset.v);
+    e.setAttribute('aria-pressed', e.dataset.v === S.view);
+  });
+  $('#views').hidden = b.views.length < 2;                      // nothing to switch between
+  for (const v of ['table', 'flow', 'plot']) $('#' + v).hidden = v !== S.view;
+  $('#wl').hidden = !b.grid;
+  if (b.grid) {
+    Object.assign($('#slider'), {max: b.grid.length - 1, value: S.i});
+    $('#wlv').value = wlText(S.i);
+    $('#wlLo').textContent = fmt(b.grid[0]); $('#wlHi').textContent = fmt(b.grid.at(-1));
+  }
+  for (const [id, views] of Object.entries(TOOLS)) $('#' + id).hidden = !views.includes(S.view);
+  if (!b.columns.length) $('#cols').hidden = true;
+  $('#theme').textContent = THEME_ICON[S.theme];
+  $('#theme').title = `Theme: ${S.theme} (click to change)`;
+  $('#cols div').innerHTML = b.columns.map(k => `<label><input type="checkbox" value="${esc(k)}"${S.hide[S.b].has(k) ? '' : ' checked'}><code>${esc(k)}</code></label>`).join('');
+  $('#logy').setAttribute('aria-pressed', !!S.log);
+  $('#hint').textContent = {table: 'Click ▾ to collapse a subsystem. Parent rows are roll-ups of their children. Export YAML writes the values at the current λ.',
+    flow: 'Click a node to collapse/expand it. Bars show CBE as a fraction of allocation (inverted when higher is better). Export PDF saves the diagram as a vector PDF.',
+    plot: 'Click legend entries to toggle components; double-click to isolate. Click the plot to set λ.'}[S.view]
+    + (b.grid ? '  ← / → step the wavelength.' : '');
+  renderSummary();
+  ({table: renderTable, flow: renderFlow, plot: renderPlot})[S.view]();
+}
+
+function setWl(j) {
+  S.i = +j;
+  if (S.view !== 'plot') return render();
+  $('#wlv').value = wlText(S.i); $('#slider').value = S.i;
+  renderSummary();
+  Plotly.relayout('plot', {'shapes[0].x0': B().grid[S.i], 'shapes[0].x1': B().grid[S.i]});
+}
+
+$('#budgets').innerHTML = BUDGETS.map((b, k) => `<button data-b="${k}">${esc(b.name)}</button>`).join('');
+$('#budgets').onclick = e => { const k = e.target.dataset.b; if (k != null) { S.b = +k; S.i = 0; render(); } };
+$('#views').onclick = e => { if (e.target.dataset.v) { S.view = e.target.dataset.v; render(); } };
+$('#slider').oninput = e => setWl(e.target.value);
+$('#table').onclick = e => { const t = e.target.closest('.tog[data-i]'); if (t) toggle(+t.dataset.i); };
+$('#flow').onclick = e => { const g = e.target.closest('.node'); if (g && B().nodes[g.dataset.i].kids.length) toggle(+g.dataset.i); };
+$('#logy').onclick = () => { S.log = !S.log; render(); };
+$('#cols div').onchange = e => { const h = S.hide[S.b], k = e.target.value; e.target.checked ? h.delete(k) : h.add(k); render(); };
+$('#exYaml').onclick = exportYAML;
+$('#exXlsx').onclick = exportXLSX;
+$('#exPdf').onclick = exportPDF;
+$('#exPng').onclick = () => lightPlot(el => Plotly.downloadImage(el, {format: 'png', scale: 2, filename: slug(B().name + '_spectrum')}));
+$('#theme').onclick = () => setTheme({auto: 'light', light: 'dark', dark: 'auto'}[S.theme]);
+$('#expand').onclick = () => { S.closed[S.b].clear(); render(); };
+$('#collapse').onclick = () => { B().nodes.forEach((n, i) => i && n.kids.length && S.closed[S.b].add(i)); render(); };
+addEventListener('keydown', e => {                // ← / → step λ, shift for ten steps
+  const step = {ArrowLeft: -1, ArrowRight: 1}[e.key];
+  if (!step || !B().grid || e.target.matches('input, select, textarea')) return;
+  setWl(Math.max(0, Math.min(B().grid.length - 1, S.i + step * (e.shiftKey ? 10 : 1))));
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+PHONE.addEventListener('change', render);        // rotating the phone re-lays out the table
+setTheme(S.theme);   // applies a stored choice and renders
+</script>
+</body>
+</html>

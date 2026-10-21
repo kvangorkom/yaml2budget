@@ -1,0 +1,39 @@
+# Spatial resolution budget (arcsec FWHM). Parent CBEs are the RSS of their children.
+name: Spatial resolution
+units: arcsec
+rollup: rss
+wavelength: [400, 1000, 10]   # [min, max, step] in nm
+levels: [Instrument, Subsystem, Term]
+alloc: 3.5
+children:
+  - name: Optics
+    alloc: 2.7
+    children:
+      - {name: Diffraction,       cbe: data/diffraction.csv}
+      - {name: Design residual,   cbe: data/design_residual.csv, notes: "Zemax, nominal field"}
+      - {name: Fabrication,       cbe: data/fabrication.csv, notes: λ/20 RMS WFE}
+      - {name: Alignment,         cbe: 0.825, alloc: 1.03}
+      - {name: Mounting,          cbe: 0.516}
+      - {name: Thermal stability, cbe: data/thermal_focus.csv}
+  - name: Pointing
+    alloc: 1.24
+    children:
+      - {name: Jitter, cbe: 0.825, notes: "RWA-induced, 1σ → FWHM"}
+      - {name: Drift,  cbe: [[400, 0.413], [1000, 0.536]], notes: inline table example}
+  - name: Detector
+    alloc: 1.86
+    children:
+      - {name: Pixel sampling,   cbe: 1.341}
+      - {name: Charge diffusion, cbe: data/charge_diffusion.csv}
+
+# Budgets derived from this one. `invert` turns each value into `scale / value`, which converts
+# the blur budget into resolving power R = λ/Δλ: with scale = λ / dispersion [arcsec], R = scale
+# / blur. Reciprocals combine as 1/R² = Σ 1/Rᵢ², hence `rollup: inverse_rss` and higher is better.
+derived:
+  - name: Spectral resolving power
+    units: ''                   # R is dimensionless
+    scale: data/resolving_power.csv
+    invert: true
+    rollup: inverse_rss
+    better: higher
+    alloc: 2000
