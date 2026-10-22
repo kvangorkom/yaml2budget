@@ -10,21 +10,21 @@
 :root {
   color-scheme: light;
   --bg: #f6f6f4; --surface: #fcfcfb; --surface2: #f0efec; --line: #dddcd7; --grid: #e8e7e3;
-  --ink: #0b0b0b; --ink2: #52514e; --ink3: #8a8983; --accent: #2a78d6;
+  --ink: #0b0b0b; --ink2: #52514e; --ink3: #8a8983; --accent: #2a78d6; --on-accent: #ffffff;
   --ok: #0ca30c; --low: #c98500; --bad: #d03b3b;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #4a3aa7; --s8: #e34948;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   color-scheme: dark;
   --bg: #111110; --surface: #1a1a19; --surface2: #242422; --line: #3a3936; --grid: #2c2c2a;
-  --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8a8983; --accent: #3987e5;
+  --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8a8983; --accent: #3987e5; --on-accent: #ffffff;
   --ok: #0ca30c; --low: #fab219; --bad: #e66767;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
 }}
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #111110; --surface: #1a1a19; --surface2: #242422; --line: #3a3936; --grid: #2c2c2a;
-  --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8a8983; --accent: #3987e5;
+  --ink: #ffffff; --ink2: #c3c2b7; --ink3: #8a8983; --accent: #3987e5; --on-accent: #ffffff;
   --ok: #0ca30c; --low: #fab219; --bad: #e66767;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
 }
@@ -94,6 +94,10 @@ svg.spark { display: block; }
 .badge rect { fill: var(--surface); stroke: var(--ink3); }
 .badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; dominant-baseline: central; }
 .more { fill: var(--ink3); font-size: 11px; }
+.count rect { fill: var(--accent); }
+.count text { fill: var(--on-accent); font-size: 12px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.qty { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 700;
+  line-height: 17px; background: var(--accent); color: var(--on-accent); cursor: help; }
 #plot { height: min(70vh, 640px); min-height: 380px; }
 #desc { flex-basis: 100%; color: var(--ink2); }
 #desc summary { cursor: pointer; font-size: 12px; }
@@ -170,6 +174,11 @@ const BUDGETS = /*DATA*/;
 const OPS = {product: ['×', 'product'], rss: ['√Σ²', 'RSS'], sum: ['Σ', 'sum'],
              inverse_rss: ['1/RSS', 'inverse RSS']};
 const badgeWidth = node => node.kids.length ? Math.max(24, 10 + 6.4 * OPS[node.op][0].length) : 0;
+// `count` identical copies of a term, combined by the parent's operator (mirrors REPEATS in budget.py).
+const REPEATS = {product: (v, k) => v ** k, sum: (v, k) => v * k, rss: (v, k) => v * Math.sqrt(k),
+                 inverse_rss: (v, k) => v / Math.sqrt(k)};
+const times = n => '×' + +n.count.toPrecision(4);
+const countWidth = n => 14 + 7.2 * times(n).length;
 const S = {b: 0, i: 0, view: 'table', theme: 'auto', closed: BUDGETS.map(() => new Set()), hide: BUDGETS.map(() => new Set())};
 try { S.theme = localStorage.getItem('pb-theme') || 'auto'; } catch {}   // per-viewer, optional
 const $ = s => document.querySelector(s);
@@ -216,6 +225,13 @@ const mcell = (m, d) => { const [c, ic] = status(m);
 const hidden = n => { for (let p = n.parent; p != null; p = B().nodes[p].parent) if (S.closed[S.b].has(p)) return true; return false; };
 const toggle = i => { const c = S.closed[S.b]; c.has(i) ? c.delete(i) : c.add(i); render(); };
 const wlText = j => B().grid ? `${fmt(B().grid[j])} ${B().wl_units}` : '';
+const counted = n => n.count !== 1 && n.parent != null;
+// What a repeated term puts into its parent's roll-up, as hover text.
+function countText(n, j = S.i) {
+  const p = B().nodes[n.parent], v = REPEATS[p.op](at(n.cbe, j), n.count);
+  return `${times(n)}: ${+n.count.toPrecision(4)} identical ${n.name} terms; ${fmt(at(n.cbe, j))} each, `
+    + `${fmt(v)} combined in ${p.name}'s ${OPS[p.op][1]}`;
+}
 
 function spark(n, W = 96, H = 22, attrs = '') {
   const g = B().grid;
@@ -249,9 +265,10 @@ function renderTable() {
     if (hidden(n)) return '';
     const tog = n.kids.length ? `<button class="tog" data-i="${i}">${S.closed[S.b].has(i) ? '▸' : '▾'}</button>` : '<span class="tog"></span>';
     const [wm, wj] = worst(n);
+    const qty = counted(n) ? `<span class="qty" title="${esc(countText(n))}">${times(n)}</span>` : '';
     const name = narrow()
-      ? `<td style="padding-left:${6 + n.depth * 14}px">${tog}${esc(n.name)}</td>`
-      : '<td class="g"></td>'.repeat(n.depth) + `<td colspan="${L - n.depth}">${tog}${esc(n.name)}</td>`;
+      ? `<td style="padding-left:${6 + n.depth * 14}px">${tog}${esc(n.name)}${qty}</td>`
+      : '<td class="g"></td>'.repeat(n.depth) + `<td colspan="${L - n.depth}">${tog}${esc(n.name)}${qty}</td>`;
     return `<tr class="d${n.depth}${n.kids.length ? ' roll' : ''}">` + name
       + (narrow() ? '' : `<td class="op">${n.op ? esc(OPS[n.op][1]) : ''}</td>`)
       + `<td class="num">${fmt(at(n.cbe))}</td><td class="num">${fmt(at(n.alloc))}</td><td class="num">${mcell(margin(n), diff(n))}</td>`
@@ -263,7 +280,7 @@ function renderTable() {
 
 // Left-to-right tidy tree: leaves (or collapsed nodes) take successive rows; parents center on their children.
 function renderFlow() {
-  const b = B(), W = 260, H = 74, GX = 72, GY = 12, pos = {};
+  const b = B(), W = 260, H = 74, GX = 72 + Math.max(0, ...b.nodes.filter(counted).map(countWidth)) * (2 / 3), GY = 12, pos = {};
   let y = 0;
   (function place(i) {
     const n = b.nodes[i], x = n.depth * (W + GX);
@@ -279,12 +296,17 @@ function renderFlow() {
     const x2 = c.x, y2 = c.y + H / 2, xm = (x1 + x2) / 2;
     return `<path class="edge" d="M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}"/>`;
   }).join('');
+  const counts = ids.filter(i => counted(b.nodes[i])).map(i => {    // ×N where the term flows up
+    const n = b.nodes[i], cw = countWidth(n), {x, y: yy} = pos[i];
+    return `<g class="count" transform="translate(${x - 6 - cw / 2},${yy + H / 2})"><title>${esc(countText(n))}</title>`
+      + `<rect x="${-cw / 2}" y="-11" width="${cw}" height="22" rx="11"/><text>${times(n)}</text></g>`;
+  }).join('');
   const nodes = ids.map(i => {
     const n = b.nodes[i], {x, y: yy} = pos[i], m = margin(n), [cls, ic] = status(m), closed = S.closed[S.b].has(i);
     const wide = !isVec(n) && n.alloc == null, lim = wide ? 32 : 20;   // leave room for the sparkline / bar
     const name = n.name.length > lim ? n.name.slice(0, lim - 1) + '…' : n.name;
     const frac = n.alloc == null ? 0 : Math.max(0, Math.min(1, b.better === 'higher' ? at(n.alloc) / at(n.cbe) : at(n.cbe) / at(n.alloc)));
-    return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${yy})"><title>${esc([n.name, n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
+    return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${yy})"><title>${esc([n.name, counted(n) ? countText(n) : '', n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
       + `<rect class="card" width="${W}" height="${H}" rx="10"/>`
       + `<text class="name" x="12" y="22">${esc(name)}</text>`
       + `<text x="12" y="41">CBE ${fmt(at(n.cbe))}${n.alloc != null ? ' / ' + fmt(at(n.alloc)) : ''} ${esc(b.units)}</text>`
@@ -297,7 +319,7 @@ function renderFlow() {
       + (closed ? `<text class="more" x="${W - 12}" y="22" text-anchor="end">+${n.kids.length}</text>` : '')
       + '</g>';
   }).join('');
-  $('#flow').innerHTML = `<svg width="${w}" height="${y}" viewBox="0 0 ${w} ${y}">${edges}${nodes}</svg>`;
+  $('#flow').innerHTML = `<svg width="${w}" height="${y}" viewBox="0 0 ${w} ${y}">${edges}${counts}${nodes}</svg>`;
   if (narrow()) {                                // a phone either fits the diagram on screen,
     const view = $('#flow'), room = view.clientWidth - 16;   // or opens it at the root card
     if (room / w >= 0.6) {
@@ -318,7 +340,7 @@ function renderPlot() {
   const traces = b.nodes.flatMap((n, i) => {
     const root = i === 0, color = root ? css('--ink') : colors[n.branch % 8];
     const group = {legendgroup: root ? 'root' : 'g' + n.branch, legendgrouptitle: {text: root ? 'Total' : b.nodes[b.nodes[0].kids[n.branch]].name}};
-    const t = [{...group, x: b.grid, y: series(n.cbe), name: n.name + (n.kids.length && !root ? ' (roll-up)' : ''),
+    const t = [{...group, x: b.grid, y: series(n.cbe), name: n.name + (counted(n) ? ' ' + times(n) : '') + (n.kids.length && !root ? ' (roll-up)' : ''),
       line: {color, width: root ? 3.5 : n.kids.length ? 2.5 : 1.5, dash: n.kids.length || root ? 'solid' : dashes[n.sib % 6]},
       hovertemplate: `%{y:.4g}`}];
     if (n.alloc != null) t.push({...group, x: b.grid, y: series(n.alloc), name: n.name + ' alloc', visible: root || 'legendonly',
@@ -482,14 +504,14 @@ const sheetName = name => name.replace(/[\\\/?*\[\]:]/g, '-').slice(0, 31) || 'B
 function exportXLSX() {
   const b = B(), unit = b.units ? ` [${b.units}]` : '';
   const cols = b.columns.filter(k => !S.hide[S.b].has(k));
-  const depth = Math.max(...b.nodes.map(n => n.depth)) + 1;
+  const depth = Math.max(...b.nodes.map(n => n.depth)) + 1, qty = b.nodes.some(counted);
   const head = [...Array(depth)].map((_, d) => b.levels[d] ?? `Level ${d}`).concat(
-    ['Roll-up', `CBE${unit}`, `Alloc${unit}`, 'Margin', `Margin Δ${unit}`],
+    ['Roll-up'], qty ? ['Count'] : [], [`CBE${unit}`, `Alloc${unit}`, 'Margin', `Margin Δ${unit}`],
     b.grid ? ['Worst in band', `Worst at [${b.wl_units}]`] : [], ['Notes'], cols);
   const rows = b.nodes.map(n => {
     const [wm, wj] = worst(n), cells = [...Array(depth)].map(() => ['', 'text']);
     cells[n.depth] = [n.name, 'text'];
-    cells.push([n.op ? OPS[n.op][1] : '', 'text'], [at(n.cbe), 'num'], [at(n.alloc), 'num'],
+    cells.push([n.op ? OPS[n.op][1] : '', 'text'], ...(qty ? [[counted(n) ? n.count : '', 'num']] : []), [at(n.cbe), 'num'], [at(n.alloc), 'num'],
       [margin(n), 'pct'], [diff(n), 'num']);
     if (b.grid) cells.push([wm, 'pct'], [wm == null ? '' : b.grid[wj], 'num']);
     cells.push([n.notes, 'text'], ...cols.map(k => [n.extra[k] ?? '', 'text']));
@@ -498,7 +520,7 @@ function exportXLSX() {
   const sheets = [{
     name: sheetName(b.name), head, rows,
     title: `${b.name}${b.grid ? ` — λ = ${wlText(S.i)}` : ''}  ·  exported ${new Date().toISOString().slice(0, 10)}`,
-    widths: [...Array(depth).fill(20), 10, 14, 14, 11, 14, ...(b.grid ? [13, 14] : []), 46, ...cols.map(() => 24)],
+    widths: [...Array(depth).fill(20), 10, ...(qty ? [8] : []), 14, 14, 11, 14, ...(b.grid ? [13, 14] : []), 46, ...cols.map(() => 24)],
   }];
   if (b.grid) {                                  // second sheet: every term over the full band
     const paths = b.nodes.map((n, i) => {
@@ -597,7 +619,7 @@ function exportPDF() {
 function exportYAML() {
   const b = B(), q = v => typeof v === 'number' ? String(+v.toPrecision(6)) : typeof v === 'boolean' ? String(v) : JSON.stringify(String(v));
   const fields = (n, p) => [['cbe', at(n.cbe)], ['alloc', at(n.alloc)], ['margin', diff(n)], ['margin_frac', margin(n)],
-    ['rollup', n.op], ['notes', n.notes || null], ...Object.entries(n.extra)]
+    ['count', counted(n) ? n.count : null], ['rollup', n.op], ['notes', n.notes || null], ...Object.entries(n.extra)]
     .filter(([, v]) => v != null).map(([k, v]) => `${p}${k}: ${q(v)}`);
   const node = (i, ind, dash) => {
     const n = b.nodes[i], p = ind + (dash ? '  ' : '');
@@ -655,8 +677,8 @@ function render() {
   $('#theme').title = `Theme: ${S.theme} (click to change)`;
   $('#cols div').innerHTML = b.columns.map(k => `<label><input type="checkbox" value="${esc(k)}"${S.hide[S.b].has(k) ? '' : ' checked'}><code>${esc(k)}</code></label>`).join('');
   $('#logy').setAttribute('aria-pressed', !!S.log);
-  $('#hint').textContent = {table: 'Click ▾ to collapse a subsystem. Parent rows are roll-ups of their children. Export YAML writes the values at the current λ.',
-    flow: 'Click a node to collapse/expand it. Bars show CBE as a fraction of allocation (inverted when higher is better). Export PDF saves the diagram as a vector PDF.',
+  $('#hint').textContent = {table: 'Click ▾ to collapse a subsystem. Parent rows are roll-ups of their children; ×N marks a term counted N times. Export YAML writes the values at the current λ.',
+    flow: 'Click a node to collapse/expand it. A ×N bubble marks a term that enters its parent N times. Bars show CBE as a fraction of allocation (inverted when higher is better). Export PDF saves the diagram as a vector PDF.',
     plot: 'Click legend entries to toggle components; double-click to isolate. Click the plot to set λ.'}[S.view]
     + (b.grid ? '  ← / → step the wavelength.' : '');
   renderSummary();

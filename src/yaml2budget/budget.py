@@ -23,14 +23,22 @@ ROLLUPS = {
     # resolving powers and other reciprocal quantities: 1/R^2 = sum 1/R_i^2
     'inverse_rss': lambda vals: 1 / np.sqrt(reduce(np.add, [1 / np.square(v) for v in vals])),
 }
+# What `count` identical copies of a term roll up to: ROLLUPS[op]([v] * n) == REPEATS[op](v, n)
+REPEATS = {
+    'product': lambda v, n: np.power(v, n),
+    'sum': lambda v, n: np.multiply(v, n),
+    'rss': lambda v, n: np.multiply(v, np.sqrt(n)),
+    'inverse_rss': lambda v, n: np.divide(v, np.sqrt(n)),
+}
 HIGHER_IS_BETTER = ('product', 'inverse_rss')
 CDN = [
     'https://cdn.jsdelivr.net/npm/plotly.js-dist-min@3.7.0/plotly.min.js',    # spectrum view
     'https://cdn.jsdelivr.net/npm/jspdf@4.2.1/dist/jspdf.umd.min.js',         # PDF export
     'https://cdn.jsdelivr.net/npm/svg2pdf.js@2.8.1/dist/svg2pdf.umd.min.js',
 ]
-ALIASES = {'allocation': 'alloc', 'spec': 'alloc', 'description': 'notes'}
-NODE_KEYS = {'name', 'cbe', 'alloc', 'children', 'rollup', 'notes'}   # keys with their own column
+ALIASES = {'allocation': 'alloc', 'spec': 'alloc', 'description': 'notes',
+           'multiplier': 'count', 'quantity': 'count'}
+NODE_KEYS = {'name', 'cbe', 'alloc', 'children', 'rollup', 'notes', 'count'}   # shown on their own
 BUDGET_KEYS = {'units', 'better', 'levels', 'wavelength', 'wavelength_units', 'margin_warn',
                'derived', 'description', 'views'}
 VIEWS = {'table': 'table', 'flowchart': 'flow', 'spectrum': 'plot',   # YAML name -> page id
@@ -96,6 +104,16 @@ def margins(cbe, alloc, better):
     return alloc - cbe, 1 - cbe / alloc
 
 
+def read_count(node, path, budget_name, is_root):
+    """A node's `count` (how many identical copies of it its parent rolls up), default 1."""
+    count = node.get('count', 1)
+    if isinstance(count, bool) or not isinstance(count, (int, float)) or count <= 0:
+        raise ValueError(f'{budget_name}: "{path}" count must be a positive number, not {count!r}')
+    if is_root and count != 1:
+        raise ValueError(f'{budget_name}: the root has no parent to repeat it in; drop `count`')
+    return count
+
+
 def describe(value):
     """Short text for a scalar or vector, used in the replacement warnings."""
     if value is None:
@@ -138,8 +156,11 @@ def evaluate(budget, src, default_rollup='rss'):
         rollup = node.setdefault('rollup', inherited)
         children = node.get('children', [])
         node['alloc'] = on_grid(node['alloc'])
-        if children:
-            computed = ROLLUPS[rollup]([roll(child, rollup, path) for child in children])
+        read_count(node, path, budget['name'], not parent_path)
+        if children:                            # a child's value is per copy; `count` repeats it
+            computed = ROLLUPS[rollup]([REPEATS[rollup](roll(child, rollup, path),
+                                                        child.get('count', 1))
+                                        for child in children])
             if node['cbe'] is not None:
                 replaced(path, 'cbe', on_grid(node['cbe']), computed)
             node['cbe'] = computed
@@ -204,6 +225,7 @@ def flatten(budget, grid):
         skip = NODE_KEYS | (BUDGET_KEYS if parent is None else set())
         nodes.append(dict(
             parent=parent, depth=depth, name=node['name'], notes=node.get('notes', ''),
+            count=node.get('count', 1),
             op=node['rollup'] if node.get('children') else None,
             cbe=rounded(node['cbe']), alloc=rounded(node['alloc']),
             extra={key: displayed(value) for key, value in node.items()
@@ -243,7 +265,8 @@ def load_budget(path, default_rollup='rss'):
     budget = normalize(yaml.safe_load(path.read_text()), path.stem)
     budget['description'] = budget.pop('notes', '').strip().strip("'").strip()
     children = budget.get('children', [])
-    if len(children) == 1 and not {'cbe', 'alloc'} & budget.keys():   # wrapper root, e.g. `total:`
+    if (len(children) == 1 and not {'cbe', 'alloc'} & budget.keys()   # wrapper root, e.g. `total:`
+            and 'count' not in children[0]):                           # (a repeated term is not)
         budget = {**budget, **children[0], 'name': budget['name']}
     return budget, evaluate(budget, path, default_rollup)
 
@@ -280,8 +303,9 @@ def render(pages, inline=(), fonts=None):
     return TEMPLATE.read_text().replace('/*DATA*/', data).replace('<!--SCRIPTS-->', scripts)
 
 
-__all__ = ['ROLLUPS', 'HIGHER_IS_BETTER', 'CDN', 'VIEWS', 'MIN_POINTS', 'TEMPLATE', 'ALIASES',
-           'NODE_KEYS',
+__all__ = ['ROLLUPS', 'REPEATS', 'HIGHER_IS_BETTER', 'CDN', 'VIEWS', 'MIN_POINTS', 'TEMPLATE',
+           'ALIASES', 'NODE_KEYS',
            'BUDGET_KEYS', 'MARGIN_KEYS', 'normalize', 'walk', 'read_value',
-           'make_grid', 'margins', 'describe', 'evaluate', 'derive', 'rounded', 'displayed',
-           'flatten', 'page_views', 'load_budget', 'load_all', 'encode_fonts', 'render']
+           'make_grid', 'margins', 'read_count', 'describe', 'evaluate', 'derive', 'rounded',
+           'displayed', 'flatten', 'page_views', 'load_budget', 'load_all', 'encode_fonts',
+           'render']

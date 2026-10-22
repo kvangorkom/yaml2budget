@@ -10,8 +10,8 @@ children:
   - name: Telescope
     alloc: 0.70
     children:
-      - {name: Primary mirror,   cbe: data/al_mgf2_reflectance.csv, notes: Al + MgF2 witness sample}
-      - {name: Secondary mirror, cbe: data/al_mgf2_reflectance.csv}
+      # `count: 2` -> two identical surfaces; the product roll-up takes the reflectance squared
+      - {name: Mirrors, cbe: data/al_mgf2_reflectance.csv, count: 2, notes: "primary + secondary, Al + MgF2 witness sample"}
       - {name: Central obscuration, cbe: 0.88, notes: geometric}
   - name: Spectrometer
     alloc: 0.40

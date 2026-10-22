@@ -119,6 +119,95 @@ children:
         self.assertAlmostEqual(budget['cbe'], 7)
 
 
+class Counts(unittest.TestCase):
+    """`count: N` enters a term N times into its parent's roll-up; its own values stay per copy."""
+
+    def rolled(self, rollup, count=3, extra=''):
+        budget, _, _ = build(f"""
+name: T
+rollup: {rollup}
+children:
+  - {{name: A, cbe: 2, alloc: 2.5, count: {count}{extra}}}
+  - {{name: B, cbe: 5}}
+""")
+        return budget
+
+    def test_each_operator_sees_n_identical_terms(self):
+        expected = {'product': 2 * 2 * 2 * 5, 'sum': 2 + 2 + 2 + 5,
+                    'rss': np.sqrt(3 * 2 ** 2 + 5 ** 2),
+                    'inverse_rss': 1 / np.sqrt(3 / 2 ** 2 + 1 / 5 ** 2)}
+        for rollup, value in expected.items():
+            with self.subTest(rollup):
+                self.assertAlmostEqual(self.rolled(rollup)['cbe'], value)
+
+    def test_repeats_match_the_rollup_of_copies(self):
+        v = np.array([0.5, 0.9, 2.0])
+        for rollup, combine in pb.ROLLUPS.items():
+            with self.subTest(rollup):
+                np.testing.assert_allclose(pb.REPEATS[rollup](v, 4), combine([v] * 4))
+
+    def test_the_node_keeps_its_per_copy_values(self):
+        a = node(self.rolled('product'), 'A')
+        self.assertEqual((a['cbe'], a['alloc']), (2, 2.5))
+
+    def test_a_vector_term_is_raised_to_the_power(self):
+        budget, _, _ = build("""
+name: T
+rollup: product
+wavelength: [400, 800, 400]
+children: [{name: Mirrors, cbe: [[400, 0.9], [800, 0.8]], count: 5}]
+""")
+        np.testing.assert_allclose(budget['cbe'], [0.9 ** 5, 0.8 ** 5])
+
+    def test_a_repeated_subtree_counts_as_a_whole(self):
+        budget, _, _ = build("""
+name: T
+rollup: sum
+children:
+  - name: Camera
+    count: 2
+    children: [{name: Lens, cbe: 3}, {name: Body, cbe: 4}]
+""")
+        self.assertAlmostEqual(node(budget, 'Camera')['cbe'], 7)
+        self.assertAlmostEqual(budget['cbe'], 14)
+
+    def test_aliases(self):
+        for key in ('multiplier', 'quantity'):
+            budget, _, _ = build(f'name: T\nrollup: sum\n'
+                                 f'children: [{{name: A, cbe: 2, {key}: 4}}]\n')
+            self.assertAlmostEqual(budget['cbe'], 8)
+
+    def test_invalid_counts_are_errors(self):
+        for count in ('0', '-2', 'many', 'true'):
+            with self.subTest(count), self.assertRaises(ValueError):
+                self.rolled('sum', count)
+
+    def test_the_root_cannot_be_repeated(self):
+        with self.assertRaises(ValueError):
+            build('name: T\ncount: 2\nrollup: sum\nchildren: [{name: A, cbe: 1}]\n')
+
+    def test_the_page_gets_the_count_and_not_a_column(self):
+        page = pb.flatten(self.rolled('sum'), None)
+        self.assertEqual([n['count'] for n in page['nodes']], [1, 3, 1])
+        self.assertEqual(page['columns'], [])
+
+    def test_derived_budgets_stay_consistent(self):
+        directory = tempfile.mkdtemp()
+        budget, grid, _ = build("""
+name: Blur
+rollup: rss
+wavelength: [400, 800, 400]
+children: [{name: A, cbe: 2, count: 4}, {name: B, cbe: 3}]
+derived: [{name: R, scale: 1000, invert: true, rollup: inverse_rss, better: higher}]
+""", directory)
+        derived = pb.derive(budget, budget['derived'][0], grid, pathlib.Path(directory))
+        self.assertAlmostEqual(float(np.ravel(budget['cbe'])[0]), 5)           # sqrt(4*4 + 9)
+        self.assertAlmostEqual(float(np.ravel(derived['cbe'])[0]), 1000 / 5)   # scale / blur
+        recomputed = pb.ROLLUPS['inverse_rss'](
+            [pb.REPEATS['inverse_rss'](node(derived, 'A')['cbe'], 4), node(derived, 'B')['cbe']])
+        self.assertAlmostEqual(float(np.ravel(recomputed)[0]), 200)
+
+
 class VectorRollups(unittest.TestCase):
     """The same operators with wavelength-dependent terms, checked per grid point."""
 

@@ -10,7 +10,7 @@ yaml2budget examples -o budgets.html \
     --font DejaVuSans.ttf DejaVuSans-Bold.ttf      # fully self-contained (~7 MB)
 
 python examples/make_data.py              # regenerate the example CSVs
-python -m unittest discover -s tests -v   # 60 tests
+python -m unittest discover -s tests -v   # 76 tests
 ```
 
 The same thing from Python:
@@ -70,7 +70,7 @@ Status marks (✓ ✕ ▲) and the minus sign are always substituted — no PDF-
 
 One budget per `*.yaml` file. Every node has the same shape; nest to any depth.
 Children can be a `children:` list or named sub-mappings (`telescope: {...}`, name = key).
-Aliases: `allocation`/`spec` → `alloc`, `description` → `notes`. A root holding a single
+Aliases: `allocation`/`spec` → `alloc`, `description` → `notes`, `multiplier`/`quantity` → `count`. A root holding a single
 child and no values (e.g. `total:`) is merged into that child; its text becomes the page's
 "About this budget". A supplied parent `cbe` or `margin` is replaced by the computed value
 (roll-up; fractional margin as defined below) and a warning is printed for each replacement.
@@ -86,6 +86,7 @@ collapsed behind its first line. Extras also appear in the flowchart hover text.
 | `cbe` | leaves | value (see below). Parent CBEs are always computed. |
 | `alloc` / `spec` | any node | allocation or requirement (optional) |
 | `children` | any node | list of nodes |
+| `count` | any node but the root | how many identical copies of this term its parent rolls up (default 1); `cbe` and `alloc` stay per copy. See below. |
 | `rollup` | any node | `rss` · `product` · `sum` · `inverse_rss`; inherited by descendants. Root default `rss` (or `--rollup`). |
 | `notes` | any node | free text |
 | `units` | root | display units, shared by the whole budget |
@@ -100,6 +101,19 @@ collapsed behind its first line. Extras also appear in the flowchart hover text.
 
 **Values** are a number, a CSV path (relative to the YAML; columns `wavelength, value`;
 a non-numeric header row is skipped), or an inline table `[[wl, v], ...]`.
+
+**Repeated terms**: `count: N` stands for N identical copies of a node — five mirrors with the same
+coating are one entry with the reflectance curve and `count: 5`. Its own `cbe`, `alloc` and margin
+stay per copy; what it contributes to the parent is what N copies roll up to under the parent's
+operator: `product` → vᴺ, `sum` → N·v, `rss` → √N·v (independent errors), `inverse_rss` → v/√N.
+A node with children can be repeated too (e.g. two identical cameras). Any positive number is
+accepted. The page marks the term with a ×N pill in the table, a ×N bubble on its edge into the
+parent in the flowchart (hover for the combined value) and ×N in the spectrum legend; the YAML
+export keeps `count` and the Excel export adds a *Count* column.
+
+```yaml
+- {name: Mirrors, cbe: data/al_mgf2_reflectance.csv, count: 5}
+```
 
 `inverse_rss` combines reciprocals in quadrature (1/R² = Σ 1/Rᵢ²), which is how resolving powers
 and other "higher is better" reciprocal quantities add up; it defaults to `better: higher`.
