@@ -92,10 +92,10 @@ svg.spark { display: block; }
 .node text.name { fill: var(--ink); font-weight: 600; font-size: 13px; }
 .node text.st { fill: currentColor; font-weight: 600; }
 .badge rect { fill: var(--surface); stroke: var(--ink3); }
-.badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; dominant-baseline: central; }
+.badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; }
 .more { fill: var(--ink3); font-size: 11px; }
 .count rect { fill: var(--accent); }
-.count text { fill: var(--on-accent); font-size: 12px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.count text { fill: var(--on-accent); font-size: 12px; font-weight: 700; text-anchor: middle; }
 .qty { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 700;
   line-height: 17px; background: var(--accent); color: var(--on-accent); cursor: help; }
 #plot { height: min(70vh, 640px); min-height: 380px; }
@@ -173,6 +173,7 @@ td.x { color: var(--ink2); font-weight: 400 !important; }
 const BUDGETS = /*DATA*/;
 const OPS = {product: ['×', 'product'], rss: ['√Σ²', 'RSS'], sum: ['Σ', 'sum'],
              inverse_rss: ['1/RSS', 'inverse RSS']};
+// Pill labels sit on a baseline 0.35em below the pill's centre (svg2pdf ignores dominant-baseline).
 const badgeWidth = node => node.kids.length ? Math.max(24, 10 + 6.4 * OPS[node.op][0].length) : 0;
 // `count` identical copies of a term, combined by the parent's operator (mirrors REPEATS in budget.py).
 const REPEATS = {product: (v, k) => v ** k, sum: (v, k) => v * k, rss: (v, k) => v * Math.sqrt(k),
@@ -299,7 +300,7 @@ function renderFlow() {
   const counts = ids.filter(i => counted(b.nodes[i])).map(i => {    // ×N where the term flows up
     const n = b.nodes[i], cw = countWidth(n), {x, y: yy} = pos[i];
     return `<g class="count" transform="translate(${x - 6 - cw / 2},${yy + H / 2})"><title>${esc(countText(n))}</title>`
-      + `<rect x="${-cw / 2}" y="-11" width="${cw}" height="22" rx="11"/><text>${times(n)}</text></g>`;
+      + `<rect x="${-cw / 2}" y="-11" width="${cw}" height="22" rx="11"/><text y="4.2">${times(n)}</text></g>`;
   }).join('');
   const nodes = ids.map(i => {
     const n = b.nodes[i], {x, y: yy} = pos[i], m = margin(n), [cls, ic] = status(m), closed = S.closed[S.b].has(i);
@@ -315,7 +316,7 @@ function renderFlow() {
       + (n.alloc != null ? `<rect x="${W - 100}" y="56" width="88" height="4" rx="2" fill="var(--grid)"/><rect class="bar" x="${W - 100}" y="56" width="${(88 * frac).toFixed(1)}" height="4" rx="2"/>` : '')
       + (n.kids.length ? `<g class="badge" transform="translate(${W + 12},${H / 2})">`
           + `<rect x="${-badgeWidth(n) / 2}" y="-11" width="${badgeWidth(n)}" height="22" rx="11"/>`
-          + `<text>${esc(OPS[n.op][0])}</text></g>` : '')
+          + `<text y="3.5">${esc(OPS[n.op][0])}</text></g>` : '')
       + (closed ? `<text class="more" x="${W - 12}" y="22" text-anchor="end">+${n.kids.length}</text>` : '')
       + '</g>';
   }).join('');
@@ -584,7 +585,11 @@ async function svgToPDF(svg, w, h, name) {
   if (markup) host.innerHTML = svg; else host.appendChild(inlineStyles(svg));   // Plotly's SVG is already self-contained
   const pt = 0.75, doc = new jspdf.jsPDF({unit: 'pt', format: [w * pt, h * pt], orientation: w > h ? 'l' : 'p'}), f = await pdfFonts();
   for (const [style, data] of Object.entries(f || {})) { doc.addFileToVFS(`pb-${style}.ttf`, data); doc.addFont(`pb-${style}.ttf`, 'PB', style); }
-  host.querySelectorAll('*').forEach(el => { if (f) el.style.fontFamily = 'PB'; });
+  host.querySelectorAll('*').forEach(el => {
+    if (f) el.style.fontFamily = 'PB';
+    const weight = parseInt(el.style.fontWeight);   // jsPDF has normal and bold only; 600 -> Times
+    if (weight) el.style.fontWeight = weight >= 600 ? 'bold' : 'normal';
+  });
   const map = f ? MARKS : ASCII;                 // without a Unicode face, fall back to ASCII throughout
   const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
   for (let t; (t = walk.nextNode());) t.nodeValue = sub(t.nodeValue, map);
