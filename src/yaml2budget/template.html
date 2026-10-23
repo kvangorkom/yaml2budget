@@ -94,6 +94,7 @@ svg.spark { display: block; }
 .badge rect { fill: var(--surface); stroke: var(--ink3); }
 .badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; }
 .more { fill: var(--ink3); font-size: 11px; }
+text.key { fill: var(--ink2); font-size: 13px; }
 .count rect { fill: var(--accent); }
 .count text { fill: var(--on-accent); font-size: 12px; font-weight: 700; text-anchor: middle; }
 .qty { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 9px; font-size: 11px; font-weight: 700;
@@ -113,6 +114,9 @@ td.x { color: var(--ink2); font-weight: 400 !important; }
   background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; box-shadow: 0 4px 16px #0002; }
 .cols label { display: flex; gap: 6px; padding: 2px 4px; white-space: nowrap; }
 .hint { color: var(--ink3); font-size: 12px; margin: 8px 2px; }
+.steady { display: inline-grid; justify-items: end; }   /* live value over an invisible widest one */
+.steady > * { grid-area: 1 / 1; }
+.steady > :last-child { visibility: hidden; }
 /* Phones: everything below only applies at <=640px; the desktop layout is unchanged. */
 @media (max-width: 640px) {
   header { padding-top: 12px; gap: 4px 12px; }
@@ -226,6 +230,13 @@ const mcell = (m, d) => { const [c, ic] = status(m);
 const hidden = n => { for (let p = n.parent; p != null; p = B().nodes[p].parent) if (S.closed[S.b].has(p)) return true; return false; };
 const toggle = i => { const c = S.closed[S.b]; c.has(i) ? c.delete(i) : c.add(i); render(); };
 const wlText = j => B().grid ? `${fmt(B().grid[j])} ${B().wl_units}` : '';
+// Values that change with λ sit in a box as wide as their widest value over the band, so the
+// summary and the table columns keep their size while the slider moves.
+const visible = h => h.replace(/<[^>]*>/g, '');
+const widest = f => (B().grid || [0]).map((_, j) => f(j)).reduce((a, h) => visible(h).length > visible(a).length ? h : a, '');
+const steady = (live, ghost) => `<span class="steady"><span>${live}</span><span aria-hidden="true">${ghost}</span></span>`;
+const ghosts = n => n.ghost ??= {cbe: widest(j => fmt(at(n.cbe, j))), alloc: widest(j => fmt(at(n.alloc, j))),
+  margin: widest(j => mcell(margin(n, j), diff(n, j)))};
 const counted = n => n.count !== 1 && n.parent != null;
 // What a repeated term puts into its parent's roll-up, as hover text.
 function countText(n, j = S.i) {
@@ -272,7 +283,8 @@ function renderTable() {
       : '<td class="g"></td>'.repeat(n.depth) + `<td colspan="${L - n.depth}">${tog}${esc(n.name)}${qty}</td>`;
     return `<tr class="d${n.depth}${n.kids.length ? ' roll' : ''}">` + name
       + (narrow() ? '' : `<td class="op">${n.op ? esc(OPS[n.op][1]) : ''}</td>`)
-      + `<td class="num">${fmt(at(n.cbe))}</td><td class="num">${fmt(at(n.alloc))}</td><td class="num">${mcell(margin(n), diff(n))}</td>`
+      + `<td class="num">${steady(fmt(at(n.cbe)), ghosts(n).cbe)}</td><td class="num">${steady(fmt(at(n.alloc)), ghosts(n).alloc)}</td>`
+      + `<td class="num">${steady(mcell(margin(n), diff(n)), ghosts(n).margin)}</td>`
       + (vec ? `<td class="num">${wm == null ? '–' : mcell(wm, diff(n, wj)) + ` <span class="op">@ ${wlText(wj)}</span>`}</td><td>${isVec(n) ? spark(n) : '<span class="op">const</span>'}</td>` : '')
       + `<td class="notes">${esc(n.notes)}</td>` + cols.map(k => xcell(n.extra[k])).join('') + '</tr>';
   }).join('');
@@ -280,7 +292,8 @@ function renderTable() {
 }
 
 // Left-to-right tidy tree: leaves (or collapsed nodes) take successive rows; parents center on their children.
-function renderFlow() {
+// `key` adds a line above the diagram naming the budget and λ (for exports).
+function renderFlow(key = false) {
   const b = B(), W = 260, H = 74, GX = 72 + Math.max(0, ...b.nodes.filter(counted).map(countWidth)) * (2 / 3), GY = 12, pos = {};
   let y = 0;
   (function place(i) {
@@ -320,7 +333,10 @@ function renderFlow() {
       + (closed ? `<text class="more" x="${W - 12}" y="22" text-anchor="end">+${n.kids.length}</text>` : '')
       + '</g>';
   }).join('');
-  $('#flow').innerHTML = `<svg width="${w}" height="${y}" viewBox="0 0 ${w} ${y}">${edges}${counts}${nodes}</svg>`;
+  const top = key ? 30 : 0, h = y + top;
+  $('#flow').innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+    + (key ? `<text class="key" x="0" y="14">${esc(b.name)}${b.grid ? ` · evaluated at λ = ${esc(wlText(S.i))}` : ''}</text>` : '')
+    + `<g transform="translate(0,${top})">${edges}${counts}${nodes}</g></svg>`;
   if (narrow()) {                                // a phone either fits the diagram on screen,
     const view = $('#flow'), room = view.clientWidth - 16;   // or opens it at the root card
     if (room / w >= 0.6) {
@@ -334,7 +350,7 @@ function renderFlow() {
   }
 }
 
-function renderPlot() {
+function renderPlot(cursor = true) {
   const b = B(), el = $('#plot'), colors = [1, 2, 3, 4, 5, 6, 7, 8].map(k => css('--s' + k));
   const dashes = ['dot', 'dash', 'longdash', 'dashdot', 'longdashdot', 'solid'];
   const series = v => b.grid.map((_, j) => at(v, j));
@@ -360,7 +376,7 @@ function renderPlot() {
     legend: narrow() ? {groupclick: 'toggleitem', orientation: 'h', y: -0.3, yanchor: 'top', x: 0,
                         font: {size: 10}, tracegroupgap: 6, bgcolor: 'rgba(0,0,0,0)'}
       : {groupclick: 'toggleitem', tracegroupgap: 12, bgcolor: 'rgba(0,0,0,0)'},
-    shapes: [{type: 'line', x0: x, x1: x, yref: 'paper', y0: 0, y1: 1, line: {color: css('--ink3'), width: 1}}],
+    shapes: cursor ? [{type: 'line', x0: x, x1: x, yref: 'paper', y0: 0, y1: 1, line: {color: css('--ink3'), width: 1}}] : [],
   }, {responsive: true, displaylogo: false, displayModeBar: !narrow()});
   if (!el._bound) { el._bound = true; el.on('plotly_click', e => setWl(e.points[0].pointIndex)); }
 }
@@ -520,7 +536,7 @@ function exportXLSX() {
   });
   const sheets = [{
     name: sheetName(b.name), head, rows,
-    title: `${b.name}${b.grid ? ` — λ = ${wlText(S.i)}` : ''}  ·  exported ${new Date().toISOString().slice(0, 10)}`,
+    title: `${b.name}${b.grid ? ` — evaluated at λ = ${wlText(S.i)}` : ''}  ·  exported ${new Date().toISOString().slice(0, 10)}`,
     widths: [...Array(depth).fill(20), 10, ...(qty ? [8] : []), 14, 14, 11, 14, ...(b.grid ? [13, 14] : []), 46, ...cols.map(() => 24)],
   }];
   if (b.grid) {                                  // second sheet: every term over the full band
@@ -601,11 +617,11 @@ async function svgToPDF(svg, w, h, name) {
 function inLight(redraw, use) {
   const prev = document.documentElement.dataset.theme;
   document.documentElement.dataset.theme = 'light';
-  const restore = () => { prev ? document.documentElement.dataset.theme = prev : delete document.documentElement.dataset.theme; redraw(); };
+  const restore = () => { prev ? document.documentElement.dataset.theme = prev : delete document.documentElement.dataset.theme; render(); };
   return Promise.resolve(redraw()).then(use).finally(restore);
 }
-const lightFlow = use => inLight(renderFlow, use);
-const lightPlot = use => inLight(renderPlot, () => {
+const lightFlow = use => inLight(() => renderFlow(true), use);     // with the λ key
+const lightPlot = use => inLight(() => renderPlot(false), () => {   // the whole band: no λ cursor
   const el = $('#plot'), {width: w, height: h} = el.getBoundingClientRect();
   return use(el, w, h);
 });
@@ -632,7 +648,7 @@ function exportYAML() {
     if (n.kids.length) L.push(p + 'children:', ...n.kids.map(k => node(k, p + '  ', true)));
     return L.join('\n');
   };
-  const text = [`# pbudget export of ${b.name}` + (b.grid ? ` at ${wlText(S.i)}` : '') + ` (${new Date().toISOString().slice(0, 10)})`,
+  const text = [`# yaml2budget export of ${b.name}` + (b.grid ? `, evaluated at λ = ${wlText(S.i)}` : '') + ` (${new Date().toISOString().slice(0, 10)})`,
     `units: ${q(b.units)}`, `better: ${q(b.better)}`,
     node(0, '', false), ''].filter(v => v != null).join('\n');
   save(text, slug(b.name + (b.grid ? '_' + fmt(b.grid[S.i]) + b.wl_units : '')) + '.yaml', 'text/yaml');
@@ -649,8 +665,10 @@ function renderSummary() {
   const b = B(), r = b.nodes[0], [wm, wj] = worst(r);
   $('#title').textContent = b.name;
   $('#desc').hidden = !b.description; $('#desc pre').textContent = b.description;
-  $('#summary').innerHTML = `CBE <b>${fmt(at(r.cbe))}</b>${r.alloc != null ? ` vs alloc <b>${fmt(at(r.alloc))}</b> ${esc(b.units)} · margin ${mcell(margin(r), diff(r))}` : ''}`
-    + (b.grid ? ` at ${wlText(S.i)}` + (wm != null ? ` · worst ${mcell(wm, diff(r, wj))} at ${wlText(wj)}` : '') : '');
+  const g = ghosts(r);
+  $('#summary').innerHTML = `CBE <b>${steady(fmt(at(r.cbe)), g.cbe)}</b>`
+    + (r.alloc != null ? ` vs alloc <b>${steady(fmt(at(r.alloc)), g.alloc)}</b> ${esc(b.units)} · margin ${steady(mcell(margin(r), diff(r)), g.margin)}` : '')
+    + (b.grid ? ` at ${steady(wlText(S.i), b.wlGhost ??= widest(wlText))}` + (wm != null ? ` · worst ${mcell(wm, diff(r, wj))} at ${wlText(wj)}` : '') : '');
 }
 
 // Which tool belongs to which view.
