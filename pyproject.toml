@@ -7,7 +7,7 @@ name = "yaml2budget"
 dynamic = ["version"]
 description = "Static HTML viewers for hierarchical performance budgets (CBE vs allocation)"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Kyle Van Gorkom", email = "kyle.vangorkom@gmail.com" }]
