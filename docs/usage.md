@@ -9,8 +9,11 @@ yaml2budget examples -o budgets.html \
     --inline plotly.min.js jspdf.umd.min.js svg2pdf.umd.min.js \
     --font DejaVuSans.ttf DejaVuSans-Bold.ttf      # fully self-contained (~7 MB)
 
+pip install "yaml2budget[export]" && playwright install chromium
+yaml2budget examples --export exports --wavelength 550   # + PDF/Excel/YAML/PNG files, see below
+
 python examples/make_data.py              # regenerate the example CSVs
-python -m unittest discover -s tests -v   # 76 tests
+python -m unittest discover -s tests -v   # 80 tests
 ```
 
 The same thing from Python:
@@ -61,6 +64,16 @@ The workbook keeps the formatting that carries meaning: frozen header, bold shad
 Excel row grouping (the +/- outline mirrors the hierarchy), margins as signed percentages coloured
 by sign, scientific format for very large or small numbers, and column widths. It is written
 directly as OOXML in a stored (uncompressed) ZIP, so no spreadsheet library is involved.
+
+**From the command line** (`--export DIR`): the same buttons are pressed in headless Chromium
+via Playwright, an optional extra (`pip install "yaml2budget[export]"`, then
+`playwright install chromium`), so the files are identical to the ones the page downloads. Every
+budget gets each format its views offer: `yaml`, `excel` (table), `flowchart` (PDF), `spectrum`
+(PDF) and `png`; pick some with `--formats flowchart excel`. `--wavelength 550` evaluates the
+table and flowchart exports at the grid point nearest 550 (default: the start of the band). From
+Python: `yaml2budget.export('budgets.html', 'exports', formats=['flowchart'], wavelength=550)`.
+In GitHub Actions, add `playwright install --with-deps chromium` after the pip install; the PDF
+font comes from the CDN unless `--font` inlines it.
 
 PDF text needs a Unicode face (jsPDF's built-in fonts are Latin-1 only): DejaVu Sans is fetched once
 from the CDN, or inlined with `--font`. Without it the text falls back to ASCII (`µrad` → `urad`).

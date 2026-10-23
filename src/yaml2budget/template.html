@@ -632,8 +632,8 @@ function exportPDF() {
     const svg = $('#flow svg');
     return svgToPDF(svg, +svg.getAttribute('width'), +svg.getAttribute('height'), tag + '_flowchart');
   });
-  return lightPlot((el, w, h) => Plotly.toImage(el, {format: 'svg', width: w, height: h})
-    .then(url => svgToPDF(decodeURIComponent(url.split(',')[1]), w, h, tag + '_spectrum')));
+  return lightPlot((el, w, h) => Plotly.toImage(el, {format: 'svg', width: w, height: h})   // whole band: no λ
+    .then(url => svgToPDF(decodeURIComponent(url.split(',')[1]), w, h, slug(b.name) + '_spectrum')));
 }
 
 // Table -> YAML at the current wavelength (JSON.stringify output is valid YAML).

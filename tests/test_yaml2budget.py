@@ -738,5 +738,66 @@ children:
         self.assertAlmostEqual(spectrum.cell(row=5, column=2).value, 9)   # 3 + 2 + 4 at 600 nm
 
 
+@unittest.skipIf(_optional('playwright') or _optional('openpyxl'),
+                 'needs playwright and openpyxl (pip install playwright openpyxl)')
+class CommandLineExport(unittest.TestCase):
+    """`yaml2budget DIR --export OUT`: the page's export buttons, pressed headlessly."""
+
+    @classmethod
+    def setUpClass(cls):
+        from yaml2budget.cli import main
+        directory = pathlib.Path(tempfile.mkdtemp())
+        write(directory, 'a.yaml', """
+name: Mass
+rollup: sum
+units: kg
+wavelength: [400, 600, 100]
+alloc: 10
+children: [{name: Lens, cbe: [[400, 1], [600, 3]]}, {name: Mount, cbe: 2, count: 2}]
+""")
+        write(directory, 'b.yaml', 'name: Power\nrollup: sum\nviews: [table]\n'
+                                   'children: [{name: A, cbe: 2}, {name: B, cbe: 1}]\n')
+        cls.out = directory / 'out'
+        with contextlib.redirect_stdout(io.StringIO()) as log, \
+                contextlib.redirect_stderr(io.StringIO()):
+            main([str(directory), '-o', str(directory / 'page.html'), '--export', str(cls.out),
+                  '--wavelength', '520'])
+        cls.log = log.getvalue()
+        cls.files = sorted(path.name for path in cls.out.iterdir())
+
+    def test_each_budget_gets_the_formats_its_views_offer(self):
+        self.assertEqual(self.files, ['Mass_500nm.xlsx', 'Mass_500nm.yaml',
+                                      'Mass_500nm_flowchart.pdf', 'Mass_spectrum.pdf',
+                                      'Mass_spectrum.png', 'Power.xlsx', 'Power.yaml'])
+
+    def test_values_are_at_the_nearest_grid_point(self):
+        exported = yaml.safe_load((self.out / 'Mass_500nm.yaml').read_text())
+        self.assertAlmostEqual(exported['children'][0]['cbe'], 2)        # lens at 500 nm
+        self.assertAlmostEqual(exported['cbe'], 2 + 2 * 2)               # mount counted twice
+        self.assertIn('evaluated at λ = 500 nm', (self.out / 'Mass_500nm.yaml').read_text())
+
+    def test_files_are_what_they_claim_to_be(self):
+        import openpyxl
+        for name in self.files:
+            data = (self.out / name).read_bytes()
+            with self.subTest(name):
+                if name.endswith('.pdf'):
+                    self.assertTrue(data.startswith(b'%PDF'))
+                elif name.endswith('.png'):
+                    self.assertTrue(data.startswith(b'\x89PNG'))
+        book = openpyxl.load_workbook(self.out / 'Mass_500nm.xlsx')
+        self.assertIn('evaluated at λ = 500 nm', book.active['A1'].value)
+
+    def test_formats_can_be_picked(self):
+        from yaml2budget.cli import main
+        out = pathlib.Path(tempfile.mkdtemp())
+        with contextlib.redirect_stdout(io.StringIO()):
+            main([str(self.out.parent), '-o', str(out / 'page.html'), '--export', str(out),
+                  '--formats', 'yaml'])
+        self.assertEqual(sorted(p.name for p in out.glob('*.yaml')),
+                         ['Mass_400nm.yaml', 'Power.yaml'])     # default: start of the band
+        self.assertEqual(sorted(p.suffix for p in out.iterdir()), ['.html', '.yaml', '.yaml'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

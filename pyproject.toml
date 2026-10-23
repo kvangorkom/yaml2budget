@@ -25,7 +25,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["openpyxl>=3.1", "playwright>=1.40"]   # for the browser-driven Excel export tests
+export = ["playwright>=1.40"]                # --export: the page's exports from the command line
+test = ["openpyxl>=3.1", "yaml2budget[export]"]  # for the browser-driven export tests
 dev = ["yaml2budget[test]", "build", "pycodestyle"]
 
 [project.scripts]
