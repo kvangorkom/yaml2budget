@@ -194,8 +194,17 @@ const B = () => BUDGETS[S.b];
 const PHONE = matchMedia('(max-width: 640px)');
 const narrow = () => PHONE.matches;
 
+// Powers in units as superscripts: cm^2 -> cm², m^-1 -> m⁻¹, s^{-1} or s**-1 -> s⁻¹. An exponent
+// with no superscript form (e.g. ^0.5) stays as typed.
+const SUP = Object.fromEntries([...'0123456789-−+()n'].map((c, k) => [c, '⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁻⁺⁽⁾ⁿ'[k]]));
+const powers = u => String(u ?? '').replace(/(?:\^|\*\*)(?:\{([^}]*)\}|([-−+]?[0-9n]+)(?![.,\d]))/g,
+  (m, braced, bare) => { const e = [...(braced ?? bare)]; return e.every(c => SUP[c]) ? e.map(c => SUP[c]).join('') : m; });
+const UNSUP = Object.fromEntries(Object.entries(SUP).map(([c, s]) => [s, c === '−' ? '-' : c]));
+const unpowers = t => t.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺⁽⁾ⁿ]+/g, run => '^' + [...run].map(c => UNSUP[c]).join(''));
+
 // Derived tree info: children lists, top-level branch (drives plot color), sibling index (drives dash).
 for (const b of BUDGETS) {
+  b.u = powers(b.units); b.wu = powers(b.wl_units);       // units as displayed
   b.nodes.forEach(n => n.kids = []);
   b.nodes.forEach((n, i) => {
     if (n.parent == null) return;
@@ -230,7 +239,7 @@ const mcell = (m, d) => { const [c, ic] = status(m);
   return `<span class="${c}">${ic} ${pct(m)}</span>${d == null ? '' : ` <span class="op">${signed(d)}</span>`}`; };
 const hidden = n => { for (let p = n.parent; p != null; p = B().nodes[p].parent) if (S.closed[S.b].has(p)) return true; return false; };
 const toggle = i => { const c = S.closed[S.b]; c.has(i) ? c.delete(i) : c.add(i); render(); };
-const wlText = j => B().grid ? `${fmt(B().grid[j])} ${B().wl_units}` : '';
+const wlText = j => B().grid ? `${fmt(B().grid[j])} ${B().wu}` : '';
 // Values that change with λ sit in a box as wide as their widest value over the band, so the
 // summary and the table columns keep their size while the slider moves.
 const visible = h => h.replace(/<[^>]*>/g, '');
@@ -268,7 +277,7 @@ function xcell(v) {
 
 function renderTable() {
   const b = B(), depth = Math.max(...b.nodes.map(n => n.depth)) + 1, vec = !!b.grid;
-  const u = b.units ? ` [${esc(b.units)}]` : '', L = narrow() ? 1 : depth;   // one indented column on a phone
+  const u = b.u ? ` [${esc(b.u)}]` : '', L = narrow() ? 1 : depth;   // one indented column on a phone
   const cols = b.columns.filter(k => !S.hide[S.b].has(k));
   const head = [...Array(L)].map((_, d) => `<th>${esc(narrow() ? b.levels[0] ?? 'Item' : b.levels[d] ?? 'Level ' + d)}</th>`).join('')
     + (narrow() ? '' : '<th>Roll-up</th>') + `<th class="num">CBE${u}</th><th class="num">Alloc${u}</th><th class="num">Margin (% · Δ${u})</th>`
@@ -304,7 +313,9 @@ function renderFlow(key = false) {
       pos[i] = {x, y: (pos[n.kids[0]].y + pos[n.kids.at(-1)].y) / 2};
     } else { pos[i] = {x, y}; y += H + GY; }
   })(0);
-  const ids = Object.keys(pos).map(Number), w = Math.max(...ids.map(i => pos[i].x)) + W + 4;
+  const ids = Object.keys(pos).map(Number);      // a collapsed card still shows its badge and +N
+  const more = i => S.closed[S.b].has(i) ? 6 + 7 * String(b.nodes[i].kids.length).length + 7 : 0;
+  const w = Math.max(...ids.map(i => pos[i].x + W + (b.nodes[i].kids.length ? 12 + badgeWidth(b.nodes[i]) / 2 : 0) + more(i))) + 4;
   const edges = ids.filter(i => b.nodes[i].parent != null).map(i => {
     const parent = b.nodes[b.nodes[i].parent], p = pos[b.nodes[i].parent], c = pos[i];
     const x1 = p.x + W + 14 + badgeWidth(parent) / 2, y1 = p.y + H / 2;
@@ -325,7 +336,7 @@ function renderFlow(key = false) {
     return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${yy})"><title>${esc([n.name, counted(n) ? countText(n) : '', n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
       + `<rect class="card" width="${W}" height="${H}" rx="10"/>`
       + `<text class="name" x="12" y="22">${esc(name)}</text>`
-      + `<text x="12" y="41">CBE ${fmt(at(n.cbe))}${n.alloc != null ? ' / ' + fmt(at(n.alloc)) : ''} ${esc(b.units)}</text>`
+      + `<text x="12" y="41">CBE ${fmt(at(n.cbe))}${n.alloc != null ? ' / ' + fmt(at(n.alloc)) : ''} ${esc(b.u)}</text>`
       + `<text class="st" x="12" y="62">${ic} ${n.alloc != null ? pct(m) + ' · ' + signed(diff(n)) : ''}</text>`
       + (isVec(n) ? spark(n, 88, 26, `x="${W - 100}" y="18"`) : '')
       + (n.alloc != null ? `<rect x="${W - 100}" y="56" width="${2 * half}" height="4" rx="2" fill="var(--grid)"/>`
@@ -334,7 +345,7 @@ function renderFlow(key = false) {
       + (n.kids.length ? `<g class="badge" transform="translate(${W + 12},${H / 2})">`
           + `<rect x="${-badgeWidth(n) / 2}" y="-11" width="${badgeWidth(n)}" height="22" rx="11"/>`
           + `<text y="3.5">${esc(OPS[n.op][0])}</text></g>` : '')
-      + (closed ? `<text class="more" x="${W - 12}" y="22" text-anchor="end">+${n.kids.length}</text>` : '')
+      + (closed ? `<text class="more" x="${W + 12 + badgeWidth(n) / 2 + 6}" y="${H / 2 + 4}">+${n.kids.length}</text>` : '')
       + '</g>';
   }).join('');
   const top = key ? 30 : 0, h = y + top;
@@ -374,9 +385,9 @@ function renderPlot(cursor = true) {
     paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)', font: {family: 'system-ui, sans-serif', color: css('--ink2'), size: 12},
     margin: narrow() ? {l: 46, r: 10, t: 8, b: 52} : {l: 64, r: 16, t: 16, b: 56},
     hovermode: 'x unified', hoverlabel: {bgcolor: css('--surface'), bordercolor: css('--line')},
-    xaxis: {...axis, title: {text: `Wavelength [${b.wl_units}]`, standoff: narrow() ? 6 : undefined}},
+    xaxis: {...axis, title: {text: `Wavelength [${b.wu}]`, standoff: narrow() ? 6 : undefined}},
     yaxis: {...axis, type: S.log ? 'log' : 'linear',        // the header already names the units
-            title: narrow() ? undefined : {text: b.name + (b.units ? ` [${b.units}]` : '')}},
+            title: narrow() ? undefined : {text: b.name + (b.u ? ` [${b.u}]` : '')}},
     legend: narrow() ? {groupclick: 'toggleitem', orientation: 'h', y: -0.3, yanchor: 'top', x: 0,
                         font: {size: 10}, tracegroupgap: 6, bgcolor: 'rgba(0,0,0,0)'}
       : {groupclick: 'toggleitem', tracegroupgap: 12, bgcolor: 'rgba(0,0,0,0)'},
@@ -523,12 +534,12 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
 const sheetName = name => name.replace(/[\\\/?*\[\]:]/g, '-').slice(0, 31) || 'Budget';
 
 function exportXLSX() {
-  const b = B(), unit = b.units ? ` [${b.units}]` : '';
+  const b = B(), unit = b.u ? ` [${b.u}]` : '';
   const cols = b.columns.filter(k => !S.hide[S.b].has(k));
   const depth = Math.max(...b.nodes.map(n => n.depth)) + 1, qty = b.nodes.some(counted);
   const head = [...Array(depth)].map((_, d) => b.levels[d] ?? `Level ${d}`).concat(
     ['Roll-up'], qty ? ['Count'] : [], [`CBE${unit}`, `Alloc${unit}`, 'Margin', `Margin Δ${unit}`],
-    b.grid ? ['Worst in band', `Worst at [${b.wl_units}]`] : [], ['Notes'], cols);
+    b.grid ? ['Worst in band', `Worst at [${b.wu}]`] : [], ['Notes'], cols);
   const rows = b.nodes.map(n => {
     const [wm, wj] = worst(n), cells = [...Array(depth)].map(() => ['', 'text']);
     cells[n.depth] = [n.name, 'text'];
@@ -551,7 +562,7 @@ function exportXLSX() {
     });
     sheets.push({
       name: 'Spectrum', title: `${b.name} vs wavelength`,
-      head: [`Wavelength [${b.wl_units}]`, ...paths],
+      head: [`Wavelength [${b.wu}]`, ...paths],
       rows: b.grid.map((w, j) => ({cells: [[w, 'num'], ...b.nodes.map(n => [at(n.cbe, j), 'num'])], roll: false, level: 0})),
       widths: [16, ...b.nodes.map(() => 18)],
     });
@@ -612,7 +623,7 @@ async function svgToPDF(svg, w, h, name) {
   });
   const map = f ? MARKS : ASCII;                 // without a Unicode face, fall back to ASCII throughout
   const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
-  for (let t; (t = walk.nextNode());) t.nodeValue = sub(t.nodeValue, map);
+  for (let t; (t = walk.nextNode());) t.nodeValue = f ? sub(t.nodeValue, map) : unpowers(sub(t.nodeValue, map));
   try { await doc.svg(host.firstElementChild, {x: 0, y: 0, width: w * pt, height: h * pt}); doc.save(name + '.pdf'); }
   finally { host.remove(); }
 }
@@ -671,7 +682,7 @@ function renderSummary() {
   $('#desc').hidden = !b.description; $('#desc pre').textContent = b.description;
   const g = ghosts(r);
   $('#summary').innerHTML = `CBE <b>${steady(fmt(at(r.cbe)), g.cbe)}</b>`
-    + (r.alloc != null ? ` vs alloc <b>${steady(fmt(at(r.alloc)), g.alloc)}</b> ${esc(b.units)} · margin ${steady(mcell(margin(r), diff(r)), g.margin)}` : '')
+    + (r.alloc != null ? ` vs alloc <b>${steady(fmt(at(r.alloc)), g.alloc)}</b> ${esc(b.u)} · margin ${steady(mcell(margin(r), diff(r)), g.margin)}` : '')
     + (b.grid ? ` at ${steady(wlText(S.i), b.wlGhost ??= widest(wlText))}` + (wm != null ? ` · worst ${mcell(wm, diff(r, wj))} at ${wlText(wj)}` : '') : '');
 }
 

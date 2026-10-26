@@ -738,6 +738,40 @@ children:
         self.assertAlmostEqual(spectrum.cell(row=5, column=2).value, 9)   # 3 + 2 + 4 at 600 nm
 
 
+@unittest.skipIf(_optional('playwright'), 'needs playwright (pip install playwright)')
+class UnitPowers(unittest.TestCase):
+    """`cm^2` and friends are shown with superscripts; exports for re-reading keep the text."""
+
+    @classmethod
+    def setUpClass(cls):
+        from playwright.sync_api import sync_playwright
+        directory = pathlib.Path(tempfile.mkdtemp())
+        write(directory, 'b.yaml', 'name: Area\nrollup: sum\nunits: cm^2\n'
+                                   'children: [{name: A, cbe: 2}, {name: B, cbe: 1}]\n')
+        page = directory / 'page.html'
+        with contextlib.redirect_stderr(io.StringIO()):
+            page.write_text(pb.render(pb.load_all(directory)))
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            tab = browser.new_page()
+            tab.goto(page.as_uri())
+            cls.shown = {u: tab.evaluate('powers', u) for u in (
+                'cm^2', 'W m^-2 sr^-1', 's^{-1}', 'm**3', 'x^0.5', 'counts', '')}
+            cls.header = tab.inner_text('#table thead')
+            cls.back = tab.evaluate("unpowers(powers('W m^-2 sr^{-1}'))")
+            browser.close()
+
+    def test_powers_become_superscripts(self):
+        self.assertEqual(self.shown, {'cm^2': 'cm²', 'W m^-2 sr^-1': 'W m⁻² sr⁻¹', 's^{-1}': 's⁻¹',
+                                      'm**3': 'm³', 'x^0.5': 'x^0.5', 'counts': 'counts', '': ''})
+
+    def test_the_page_shows_them(self):
+        self.assertIn('CBE [cm²]', self.header)
+
+    def test_plain_text_fallback_reads_back(self):
+        self.assertEqual(self.back, 'W m^-2 sr^-1')
+
+
 @unittest.skipIf(_optional('playwright') or _optional('openpyxl'),
                  'needs playwright and openpyxl (pip install playwright openpyxl)')
 class CommandLineExport(unittest.TestCase):

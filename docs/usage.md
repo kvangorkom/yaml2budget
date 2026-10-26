@@ -13,7 +13,7 @@ pip install "yaml2budget[export]" && playwright install chromium
 yaml2budget examples --export exports --wavelength 550   # + PDF/Excel/YAML/PNG files, see below
 
 python examples/make_data.py              # regenerate the example CSVs
-python -m unittest discover -s tests -v   # 80 tests
+python -m unittest discover -s tests -v   # 83 tests
 ```
 
 The same thing from Python:
@@ -103,7 +103,7 @@ collapsed behind its first line. Extras also appear in the flowchart hover text.
 | `count` | any node but the root | how many identical copies of this term its parent rolls up (default 1); `cbe` and `alloc` stay per copy. See below. |
 | `rollup` | any node | `rss` · `product` · `sum` · `inverse_rss`; inherited by descendants. Root default `rss` (or `--rollup`). |
 | `notes` | any node | free text |
-| `units` | root | display units, shared by the whole budget |
+| `units` | root | display units, shared by the whole budget. Powers are shown as superscripts: `cm^2` → cm², `m^-1` → m⁻¹, `s^{-1}` or `s**-1` → s⁻¹ (also in `wavelength_units`) |
 | `better` | root | `higher` or `lower`; default `higher` for `product`, else `lower` |
 | `levels` | root | column headings per depth, e.g. `[Instrument, Subsystem, Element]` |
 | `wavelength` | root | `[min, max, step]` grid. Omitted → common range of all tables, 1-2-5 step, ≥200 points |
