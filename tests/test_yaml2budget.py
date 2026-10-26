@@ -772,6 +772,44 @@ class UnitPowers(unittest.TestCase):
         self.assertEqual(self.back, 'W m^-2 sr^-1')
 
 
+@unittest.skipIf(_optional('playwright'), 'needs playwright (pip install playwright)')
+class FlowchartTrace(unittest.TestCase):
+    """Hovering a card lights its path to the root and everything below it."""
+
+    def test_hover_traces_up_and_down(self):
+        from playwright.sync_api import sync_playwright
+        directory = pathlib.Path(tempfile.mkdtemp())
+        write(directory, 'b.yaml', """
+name: T
+rollup: sum
+children:
+  - name: A
+    children: [{name: A1, cbe: 1}, {name: A2, cbe: 2}]
+  - name: B
+    children: [{name: B1, cbe: 3}]
+""")
+        page = directory / 'page.html'
+        page.write_text(pb.render(pb.load_all(directory)))
+        lit = 'es => es.map(e => e.textContent)'
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            tab = browser.new_page()
+            tab.goto(page.as_uri())
+            tab.click('#views button[data-v="flow"]')
+            tab.hover('#flow .node:has(text.name:text-is("A"))')
+            down = tab.eval_on_selector_all('#flow .node.on text.name', lit)
+            tab.hover('#flow .node:has(text.name:text-is("B1"))')
+            up = tab.eval_on_selector_all('#flow .node.on text.name', lit)
+            edges = tab.eval_on_selector_all('#flow .edge.on', 'es => es.length')
+            tab.mouse.move(0, 0)
+            cleared = tab.eval_on_selector_all('#flow svg.tracing', 'es => es.length')
+            browser.close()
+        self.assertEqual(down, ['T', 'A', 'A1', 'A2'])
+        self.assertEqual(up, ['T', 'B', 'B1'])
+        self.assertEqual(edges, 2)                                     # T-B and B-B1
+        self.assertEqual(cleared, 0)
+
+
 @unittest.skipIf(_optional('playwright') or _optional('openpyxl'),
                  'needs playwright and openpyxl (pip install playwright openpyxl)')
 class CommandLineExport(unittest.TestCase):

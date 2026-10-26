@@ -89,6 +89,10 @@ svg.spark { display: block; }
 .node.roll rect.card { fill: var(--surface2); }
 .node rect.bar { fill: currentColor; }
 .node rect.zero { fill: var(--ink3); }
+.edge, .node, .count { transition: opacity .12s ease, stroke .12s ease; }
+svg.tracing .node:not(.on), svg.tracing .count:not(.on), svg.tracing .edge:not(.on) { opacity: .3; }
+svg.tracing .edge.on { stroke: var(--accent); stroke-width: 2.5; }
+svg.tracing .node.on rect.card { stroke: var(--accent); }
 .node text { fill: var(--ink2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .node text.name { fill: var(--ink); font-weight: 600; font-size: 13px; }
 .node text.st { fill: currentColor; font-weight: 600; }
@@ -320,11 +324,11 @@ function renderFlow(key = false) {
     const parent = b.nodes[b.nodes[i].parent], p = pos[b.nodes[i].parent], c = pos[i];
     const x1 = p.x + W + 14 + badgeWidth(parent) / 2, y1 = p.y + H / 2;
     const x2 = c.x, y2 = c.y + H / 2, xm = (x1 + x2) / 2;
-    return `<path class="edge" d="M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}"/>`;
+    return `<path class="edge" data-i="${i}" d="M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}"/>`;
   }).join('');
   const counts = ids.filter(i => counted(b.nodes[i])).map(i => {    // ×N where the term flows up
     const n = b.nodes[i], cw = countWidth(n), {x, y: yy} = pos[i];
-    return `<g class="count" transform="translate(${x - 6 - cw / 2},${yy + H / 2})"><title>${esc(countText(n))}</title>`
+    return `<g class="count" data-i="${i}" transform="translate(${x - 6 - cw / 2},${yy + H / 2})"><title>${esc(countText(n))}</title>`
       + `<rect x="${-cw / 2}" y="-11" width="${cw}" height="22" rx="11"/><text y="4.2">${times(n)}</text></g>`;
   }).join('');
   const nodes = ids.map(i => {
@@ -352,6 +356,7 @@ function renderFlow(key = false) {
   $('#flow').innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + (key ? `<text class="key" x="0" y="14">${esc(b.name)}${b.grid ? ` · evaluated at λ = ${esc(wlText(S.i))}` : ''}</text>` : '')
     + `<g transform="translate(0,${top})">${edges}${counts}${nodes}</g></svg>`;
+  if (!key) trace(S.trace);                      // keep the hovered trace across re-renders
   if (narrow()) {                                // a phone either fits the diagram on screen,
     const view = $('#flow'), room = view.clientWidth - 16;   // or opens it at the root card
     if (room / w >= 0.6) {
@@ -363,6 +368,22 @@ function renderFlow(key = false) {
       view.scrollLeft = 0;
     }
   }
+}
+
+// Hovering a term traces it: the path up to the root and every term below it stay lit (edges in the
+// accent colour), the rest of the diagram fades. Elements carry the index of the term they belong to.
+function trace(i) {
+  const svg = $('#flow > svg');
+  if (!svg) return;
+  if (i != null && !svg.querySelector(`.node[data-i="${i}"]`)) i = null;   // not drawn here
+  S.trace = i;
+  const on = new Set();
+  if (i != null) {
+    for (let p = i; p != null; p = B().nodes[p].parent) on.add(p);
+    (function down(k) { B().nodes[k].kids.forEach(c => { on.add(c); down(c); }); })(i);
+  }
+  svg.classList.toggle('tracing', i != null);
+  svg.querySelectorAll('[data-i]').forEach(el => el.classList.toggle('on', on.has(+el.dataset.i)));
 }
 
 function renderPlot(cursor = true) {
@@ -716,7 +737,7 @@ function render() {
   $('#cols div').innerHTML = b.columns.map(k => `<label><input type="checkbox" value="${esc(k)}"${S.hide[S.b].has(k) ? '' : ' checked'}><code>${esc(k)}</code></label>`).join('');
   $('#logy').setAttribute('aria-pressed', !!S.log);
   $('#hint').textContent = {table: 'Click ▾ to collapse a subsystem. Parent rows are roll-ups of their children; ×N marks a term counted N times. Export YAML writes the values at the current λ.',
-    flow: 'Click a node to collapse/expand it. A ×N bubble marks a term that enters its parent N times. Bars show the margin: right of the tick is allocation to spare, left is an overrun; the ends are ±100%. Export PDF saves the diagram as a vector PDF.',
+    flow: 'Hover a node to trace it up to the total and down to its terms; click it to collapse/expand. A ×N bubble marks a term that enters its parent N times. Bars show the margin: right of the tick is allocation to spare, left is an overrun; the ends are ±100%. Export PDF saves the diagram as a vector PDF.',
     plot: 'Click legend entries to toggle components; double-click to isolate. Click the plot to set λ.'}[S.view]
     + (b.grid ? '  ← / → step the wavelength.' : '');
   renderSummary();
@@ -736,6 +757,8 @@ $('#budgets').onclick = e => { const k = e.target.dataset.b; if (k != null) { S.
 $('#views').onclick = e => { if (e.target.dataset.v) { S.view = e.target.dataset.v; render(); } };
 $('#slider').oninput = e => setWl(e.target.value);
 $('#table').onclick = e => { const t = e.target.closest('.tog[data-i]'); if (t) toggle(+t.dataset.i); };
+$('#flow').onpointerover = e => { const t = e.target.closest('[data-i]'); trace(t ? +t.dataset.i : null); };
+$('#flow').onpointerleave = () => trace(null);
 $('#flow').onclick = e => { const g = e.target.closest('.node'); if (g && B().nodes[g.dataset.i].kids.length) toggle(+g.dataset.i); };
 $('#logy').onclick = () => { S.log = !S.log; render(); };
 $('#cols div').onchange = e => { const h = S.hide[S.b], k = e.target.value; e.target.checked ? h.delete(k) : h.add(k); render(); };

@@ -13,7 +13,7 @@ pip install "yaml2budget[export]" && playwright install chromium
 yaml2budget examples --export exports --wavelength 550   # + PDF/Excel/YAML/PNG files, see below
 
 python examples/make_data.py              # regenerate the example CSVs
-python -m unittest discover -s tests -v   # 83 tests
+python -m unittest discover -s tests -v   # 84 tests
 ```
 
 The same thing from Python:
@@ -30,7 +30,8 @@ open('budgets.html', 'w').write(render(pages))
 `yaml2budget.budget` parses, resamples and rolls up; `yaml2budget/template.html` holds all CSS/JS and
 takes the data at `/*DATA*/`. The page has three views: **Table** (hierarchy as columns, roll-ups
 as shaded rows), **Flowchart** (left-to-right tree; each card with an allocation has a margin bar:
-the tick is zero, spare allocation grows right, an overrun grows left, the ends are ±100%), and **Spectrum** (Plotly, vector budgets
+the tick is zero, spare allocation grows right, an overrun grows left, the ends are ±100%;
+hovering a card traces its path up to the total and down to every term below it), and **Spectrum** (Plotly, vector budgets
 only). A λ slider drives the table and flowchart; clicking the plot also sets λ. Wavelength-dependent
 entries carry a sparkline in both the table and the flowchart cards. Margins are shown as a
 percentage of the allocation and as a difference in budget units.
