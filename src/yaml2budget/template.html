@@ -783,8 +783,10 @@ async function svgToPDF(svg, w, h, name) {
   if (!window.jspdf?.jsPDF || !window.svg2pdf) return save(markup ? svg : svg.outerHTML, name + '.svg', 'image/svg+xml');
   const host = document.body.appendChild(Object.assign(document.createElement('div'), {style: 'position:fixed;left:-10000px;top:0'}));
   if (markup) host.innerHTML = svg; else host.appendChild(inlineStyles(svg));   // Plotly's SVG is already self-contained
-  const pt = 0.75, foot = 18, f = await pdfFonts();
-  const doc = new jspdf.jsPDF({unit: 'pt', format: [w * pt, h * pt + foot], orientation: w > h * pt + foot ? 'l' : 'p'});
+  // jsPDF swaps the format to suit the orientation, so the orientation must follow the page's own
+  // sides (both in points), or a tall drawing gets a landscape page and is cut off.
+  const pt = 0.75, foot = 18, f = await pdfFonts(), pw = w * pt, ph = h * pt + foot;
+  const doc = new jspdf.jsPDF({unit: 'pt', format: [pw, ph], orientation: pw > ph ? 'l' : 'p'});
   for (const [style, data] of Object.entries(f || {})) { doc.addFileToVFS(`pb-${style}.ttf`, data); doc.addFont(`pb-${style}.ttf`, 'PB', style); }
   host.querySelectorAll('*').forEach(el => {
     if (f) el.style.fontFamily = 'PB';
