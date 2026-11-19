@@ -82,6 +82,7 @@ svg.spark { display: block; }
 .cursor { stroke: var(--ink2); stroke-width: 1; }
 /* flow */
 #flow svg { display: block; margin: 16px; }
+#flow { touch-action: pan-x pan-y; }            /* two-finger pinch zooms the diagram, not the page */
 .edge { fill: none; stroke: var(--line); stroke-width: 1.5; }
 .node { cursor: pointer; }
 .node rect.card { fill: var(--surface); stroke: var(--line); }
@@ -96,11 +97,11 @@ svg.tracing .node.on rect.card { stroke: var(--accent); }
 .node text { fill: var(--ink2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .node text.name { fill: var(--ink); font-weight: 600; font-size: 13px; }
 .node text.st { fill: currentColor; font-weight: 600; }
+svg.plain .node { color: var(--ink); }          /* exports: margins without status colours */
 .node text.lbl { fill: var(--ink3); font-size: 11px; }
 .node text.val { fill: var(--ink); }
 .node .rule { stroke: var(--grid); stroke-width: 1; }
 .legend rect { fill: var(--surface); stroke: var(--line); }
-.legend text { fill: var(--ink2); font-size: 11px; }
 .legend text.f { fill: var(--ink); font-size: 12px; font-weight: 600; }
 .badge rect { fill: var(--surface); stroke: var(--ink3); }
 .badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; }
@@ -324,8 +325,9 @@ function marginDef() {
 
 // A flowchart card: the name, then a small table of allocation, CBE and margin; on the right the
 // sparkline of a wavelength-dependent term over the margin bar (aligned with the margin row).
+// `plain` (exports) leaves the bar out.
 const CARD = {W: 300, H: 90, head: 30, row: 20, val: 70, side: 96};
-function card(n) {
+function card(n, plain = false) {
   const b = B(), {W, H, head, row, val, side} = CARD, m = margin(n), [, ic] = status(m), has = n.alloc != null;
   const name = n.name.length > 36 ? n.name.slice(0, 35) + '…' : n.name, u = b.u ? ' ' + esc(b.u) : '';
   const rows = [[b.alloc_label, has ? fmt(at(n.alloc)) + u : '–', 'val'], ['CBE', fmt(at(n.cbe)) + u, 'val'],
@@ -340,7 +342,7 @@ function card(n) {
         return (k ? `<line class="rule" x1="0" x2="${W - side - 8}" y1="${top}" y2="${top}"/>` : '')
           + `<text class="lbl" x="12" y="${top + 14}">${esc(label)}</text><text class="${cls}" x="${val}" y="${top + 14}">${v}</text>`; }).join('')
     + (isVec(n) ? spark(n, 88, 26, `x="${W - side}" y="${head + 4}"`) : '')
-    + (has ? `<rect x="${W - side}" y="${by - 2}" width="${2 * half}" height="4" rx="2" fill="var(--grid)"/>`
+    + (has && !plain ? `<rect x="${W - side}" y="${by - 2}" width="${2 * half}" height="4" rx="2" fill="var(--grid)"/>`
         + `<rect class="bar" x="${(m < 0 ? zero - len : zero).toFixed(1)}" y="${by - 2}" width="${len.toFixed(1)}" height="4"/>`
         + `<rect class="zero" x="${zero - 0.75}" y="${by - 6}" width="1.5" height="12"/>` : '');
 }
@@ -420,11 +422,9 @@ function layoutV(b) {
 // The margin definition, drawn as a small box in the diagram's top-left corner.
 function legend() {
   const b = B(), d = marginDef();
-  const lines = [['f', `Margin = ${d.frac}`], ['', `Δ = ${d.diff}${b.u ? ` [${b.u}]` : ''}; positive = CBE meets ${b.alloc_label}`],
-                 ['', 'Bar: tick = 0 margin, ends = ±100%']];
-  const w = 20 + 6.3 * Math.max(...lines.map(([, t]) => t.length)), h = 10 + 17 * lines.length;
+  const text = `Margin = ${d.frac}`, w = 20 + 7 * text.length, h = 28;
   return {w, h, svg: x => `<g class="legend" transform="translate(${x[0]},${x[1]})"><rect width="${w.toFixed(0)}" height="${h}" rx="8"/>`
-    + lines.map(([c, t], k) => `<text class="${c}" x="10" y="${22 + 17 * k}">${esc(t)}</text>`).join('') + '</g>'};
+    + `<text class="f" x="10" y="18">${esc(text)}</text></g>`};
 }
 
 // The flowchart: horizontal or vertical layout, cards, badges, ×N bubbles and the margin legend.
@@ -449,7 +449,7 @@ function renderFlow(key = false) {
     const n = b.nodes[i], [x, y] = T([pos[i].x, pos[i].y]), [cls] = status(margin(n)), closed = S.closed[S.b].has(i);
     const bw = badgeWidth(n), [bx, by] = n.kids.length ? [badge[i][0] - pos[i].x, badge[i][1] - pos[i].y] : [0, 0];
     return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${y})"><title>${esc([n.name, counted(n) ? countText(n) : '', n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
-      + card(n)
+      + card(n, key)
       + (n.kids.length ? `<g class="badge" transform="translate(${bx},${by})">`
           + `<rect x="${-bw / 2}" y="-11" width="${bw}" height="22" rx="11"/><text y="3.5">${esc(OPS[n.op][0])}</text></g>` : '')
       + (closed ? `<text class="more" x="${bx + bw / 2 + 6}" y="${by + 4}">+${n.kids.length}</text>` : '')
@@ -460,27 +460,53 @@ function renderFlow(key = false) {
     return `<g class="count" data-i="${i}" transform="translate(${x},${y})"><title>${esc(countText(n))}</title>`
       + `<rect x="${-bw / 2}" y="-11" width="${bw}" height="22" rx="11"/><text y="4.2">${times(n)}</text></g>`;
   }).join('');
-  $('#flow').innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+  $('#flow').innerHTML = `<svg${key ? ' class="plain"' : ''} width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + (key ? `<text class="key" x="0" y="14">${esc(b.name)}${b.grid ? ` · evaluated at λ = ${esc(wlText(S.i))}` : ''}</text>` : '')
     + lg.svg([0, top])
     + `<g transform="translate(${-x0},${dy - y0})">${edges.map(e => `<path class="edge" data-i="${e.i}" d="${e.d}"/>`).join('')}</g>`
     + counts + nodes + '</svg>';
   if (!key) trace(S.trace);                      // keep the hovered trace across re-renders
-  if (narrow()) {                                // a phone either fits the diagram on screen,
-    const view = $('#flow'), room = view.clientWidth - 16;   // or opens it at the root card
-    const [rx, ry] = T([pos[0].x, pos[0].y]);
-    if (room / w >= 0.6) {
-      const svg = view.querySelector('svg');
-      svg.setAttribute('width', room);
-      svg.setAttribute('height', Math.round(h * room / w));
-    } else if (vertical) {
-      view.scrollTop = 0;
-      view.scrollLeft = Math.max(0, rx - (room - W) / 2);
-    } else {
-      view.scrollTop = Math.max(0, ry - 24);
-      view.scrollLeft = 0;
-    }
+  if (key) return;
+  const z = sizeFlow();
+  if (narrow() && S.zoom == null && z === 1 && w > $('#flow').clientWidth) {   // too big for a phone:
+    const view = $('#flow'), room = view.clientWidth - 16, [rx, ry] = T([pos[0].x, pos[0].y]);   // open at the root card
+    if (vertical) { view.scrollTop = 0; view.scrollLeft = Math.max(0, rx - (room - W) / 2); }
+    else { view.scrollTop = Math.max(0, ry - 24); view.scrollLeft = 0; }
   }
+}
+
+// Fitting the flowchart: the pane widens past the page column, up to the window, to hold the
+// diagram; if it still does not fit, the diagram is shrunk to the pane's width (not below 50%, or
+// on a phone not below 60%, where it opens at the root card instead). Pinching sets the zoom by
+// hand (S.zoom) until the budget or the direction changes. Returns the zoom applied.
+const ZOOM = [0.25, 4];
+function sizeFlow() {
+  const view = $('#flow'), svg = view.querySelector('svg');
+  if (!svg) return 1;
+  const {width: w, height: h} = svg.viewBox.baseVal, gutter = narrow() ? 16 : 32, frame = gutter + 2;
+  view.style.width = view.style.marginLeft = '';
+  const col = view.clientWidth, room = narrow() ? col : document.documentElement.clientWidth - 32;
+  const fit = (room - frame) / w, floor = narrow() ? 0.6 : 0.5;
+  const z = S.zoom ?? (fit >= 1 ? 1 : fit >= floor ? fit : narrow() ? 1 : floor);
+  svg.setAttribute('width', Math.round(w * z));
+  svg.setAttribute('height', Math.round(h * z));
+  const need = Math.min(room, Math.round(w * z) + frame);
+  if (need > col + 2) Object.assign(view.style, {width: need + 'px', marginLeft: (col - need) / 2 + 'px'});
+  return S.zoomNow = z;
+}
+
+// Zoom about the point (cx, cy) on screen, which stays put; without it, about the middle.
+function zoomFlow(z, cx, cy) {
+  const view = $('#flow'), svg = view.querySelector('svg');
+  if (!svg) return;
+  const r0 = svg.getBoundingClientRect();
+  cx ??= r0.left + r0.width / 2; cy ??= r0.top + r0.height / 2;
+  const fx = (cx - r0.left) / r0.width, fy = (cy - r0.top) / r0.height;
+  S.zoom = Math.min(ZOOM[1], Math.max(ZOOM[0], z));
+  sizeFlow();
+  const r1 = svg.getBoundingClientRect(), dy = r1.top + fy * r1.height - cy;
+  view.scrollLeft += r1.left + fx * r1.width - cx;
+  if (view.scrollHeight > view.clientHeight) view.scrollTop += dy; else scrollBy(0, dy);
 }
 
 // Hovering a term traces it: the path up to the root and every term below it stay lit (edges in the
@@ -723,7 +749,7 @@ const slug = t => t.replace(/[^\w.-]+/g, '_');
 // jsPDF's built-in faces are Latin-1 only (µ, λ, ✓ … are dropped), so a Unicode face is embedded in
 // the PDF: inlined by --font, else fetched once from the CDN, else the text falls back to ASCII.
 const FONT_CDN = 'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans';
-const MARKS = {'✓ ': '', '✕ ': 'X ', '▲ ': '! ', '−': '-', '–': '-'};   // glyphs no PDF face carries
+const MARKS = {'✓ ': '', '✕ ': '', '▲ ': '', '−': '-', '–': '-'};   // PDFs: no status marks; signs stay
 const ASCII = {...MARKS, '√Σ²': 'RSS', 'Σ': 'sum', '∏': 'prod', '×': 'x',
   'µ': 'u', 'λ': 'lambda', 'σ': 'sigma', 'Δ': 'd', '·': '-', '→': '->'};
 const sub = (t, map) => Object.entries(map).reduce((s, [k, v]) => s.split(k).join(v), t);
@@ -867,7 +893,7 @@ function render() {
   $('#logy').setAttribute('aria-pressed', !!S.log);
   document.querySelectorAll('#orient button').forEach(e => e.setAttribute('aria-pressed', e.dataset.o === S.orient[S.b]));
   $('#hint').textContent = {table: 'Click ▾ to collapse a subsystem. Parent rows are roll-ups of their children; ×N marks a term counted N times. Export YAML writes the values at the current λ.',
-    flow: 'Hover a node to trace it up to the total and down to its terms; click it to collapse/expand. A ×N bubble marks a term that enters its parent N times. Horizontal / Vertical sets the direction of the roll-up. The box in the corner defines the margin. Bars show the margin: right of the tick is allocation to spare, left is an overrun; the ends are ±100%. Export PDF saves the diagram as a vector PDF.',
+    flow: 'Hover a node to trace it up to the total and down to its terms; click it to collapse/expand. A ×N bubble marks a term that enters its parent N times. Horizontal / Vertical sets the direction of the roll-up. The box in the corner defines the margin. Bars show the margin: right of the tick is allocation to spare, left is an overrun; the ends are ±100%. Pinch (or ctrl + scroll) to zoom. Export PDF saves the diagram as a vector PDF.',
     plot: 'Click legend entries to toggle components; double-click to isolate. Click the plot to set λ.'}[S.view]
     + (b.grid ? '  ← / → step the wavelength.' : '');
   renderSummary();
@@ -883,7 +909,7 @@ function setWl(j) {
 }
 
 $('#budgets').innerHTML = BUDGETS.map((b, k) => `<button data-b="${k}">${esc(b.name)}</button>`).join('');
-$('#budgets').onclick = e => { const k = e.target.dataset.b; if (k != null) { S.b = +k; S.i = 0; render(); } };
+$('#budgets').onclick = e => { const k = e.target.dataset.b; if (k != null) { S.b = +k; S.i = 0; S.zoom = null; render(); } };
 $('#views').onclick = e => { if (e.target.dataset.v) { S.view = e.target.dataset.v; render(); } };
 $('#slider').oninput = e => setWl(e.target.value);
 $('#table').onclick = e => { const t = e.target.closest('.tog[data-i]'); if (t) toggle(+t.dataset.i); };
@@ -891,7 +917,7 @@ $('#flow').onpointerover = e => { const t = e.target.closest('[data-i]'); trace(
 $('#flow').onpointerleave = () => trace(null);
 $('#flow').onclick = e => { const g = e.target.closest('.node'); if (g && B().nodes[g.dataset.i].kids.length) toggle(+g.dataset.i); };
 $('#logy').onclick = () => { S.log = !S.log; render(); };
-$('#orient').onclick = e => { if (e.target.dataset.o) { S.orient[S.b] = e.target.dataset.o; render(); } };
+$('#orient').onclick = e => { if (e.target.dataset.o) { S.orient[S.b] = e.target.dataset.o; S.zoom = null; render(); } };
 $('#cols div').onchange = e => { const h = S.hide[S.b], k = e.target.value; e.target.checked ? h.delete(k) : h.add(k); render(); };
 $('#exYaml').onclick = exportYAML;
 $('#exXlsx').onclick = exportXLSX;
@@ -907,6 +933,33 @@ addEventListener('keydown', e => {                // ← / → step λ, shift fo
 });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 PHONE.addEventListener('change', render);        // rotating the phone re-lays out the table
+addEventListener('resize', () => { if (S.view === 'flow') sizeFlow(); });
+// Pinch to zoom the flowchart: a trackpad pinch arrives as ctrl + wheel (Chrome, Firefox, Edge) or
+// as gesture events (Safari); a touch screen as two touches (iOS Safari also sends gesture events,
+// ignored while the touches drive it). Ctrl + mouse wheel zooms too.
+{
+  const flow = $('#flow'), fingers = t => [Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY),
+    (t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2];
+  let gesture = null, pinch = null;
+  flow.addEventListener('wheel', e => {
+    if (!e.ctrlKey || gesture) return;
+    e.preventDefault();
+    zoomFlow(S.zoomNow * Math.exp(-Math.max(-30, Math.min(30, e.deltaY)) / 100), e.clientX, e.clientY);
+  }, {passive: false});
+  flow.addEventListener('gesturestart', e => { e.preventDefault(); gesture = S.zoomNow; });
+  flow.addEventListener('gesturechange', e => { e.preventDefault(); if (!pinch) zoomFlow(gesture * e.scale, e.clientX, e.clientY); });
+  flow.addEventListener('gestureend', e => { e.preventDefault(); gesture = null; });
+  flow.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) pinch = {d: fingers(e.touches)[0], z: S.zoomNow};
+  }, {passive: true});
+  flow.addEventListener('touchmove', e => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    const [d, cx, cy] = fingers(e.touches);
+    zoomFlow(pinch.z * d / pinch.d, cx, cy);
+  }, {passive: false});
+  flow.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
+}
 setTheme(S.theme);   // applies a stored choice and renders
 </script>
 </body>

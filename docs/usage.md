@@ -35,7 +35,11 @@ allocation grows right, an overrun grows left, the ends are ±100%; hovering a c
 up to the total and down to every term below it), and **Spectrum** (Plotly, vector budgets
 only). The flowchart rolls up **horizontally** (total on the left) or **vertically** (total on top,
 like a printed error budget: a parent whose terms are all leaves stacks them in an indented column);
-the Horizontal / Vertical buttons switch it, and `orientation:` sets the default per budget. A box
+the Horizontal / Vertical buttons switch it, and `orientation:` sets the default per budget. The
+pane widens past the page column (up to the window) to hold the diagram; if it still does not fit,
+the diagram is shrunk to fit (not below 50%). Pinch on a trackpad or touch screen, or ctrl + scroll,
+to zoom between 25% and 400%; the zoom resets when you switch budget or direction. Exports are
+always drawn at full size. A box
 in the diagram's top-left corner states the margin definition (see `margin_basis`). A λ slider drives the table and flowchart; clicking the plot also sets λ. Wavelength-dependent
 entries carry a sparkline in both the table and the flowchart cards. Margins are shown as a
 percentage of the allocation and as a difference in budget units.
@@ -60,7 +64,7 @@ writer is built in, no library):
 |---|---|---|
 | Export YAML | table | the tree with the values at the current λ, in the input schema (re-readable by `yaml2budget.py`) |
 | Export Excel | table | a formatted .xlsx: the table at the current λ, plus a *Spectrum* sheet of every term over the band |
-| Export PDF | flowchart | a one-page vector PDF the size of the diagram, downloaded directly, with the margin legend |
+| Export PDF | flowchart | a one-page vector PDF the size of the diagram, downloaded directly, with the margin legend; margins are printed plain (no ✓ ✕ ▲ marks, status colours or margin bars) |
 | Export PDF / PNG | spectrum | the same for the plot, or a 2× PNG; both always drawn in light colors |
 
 Every PDF has a footer line with the date and time it was generated, the git commit of the
@@ -90,7 +94,7 @@ font comes from the CDN unless `--font` inlines it.
 
 PDF text needs a Unicode face (jsPDF's built-in fonts are Latin-1 only): DejaVu Sans is fetched once
 from the CDN, or inlined with `--font`. Without it the text falls back to ASCII (`µrad` → `urad`).
-Status marks (✓ ✕ ▲) and the minus sign are always substituted — no PDF-embeddable face carries them.
+Status marks (✓ ✕ ▲) are left out of PDFs and the minus sign is written as a hyphen.
 
 ## YAML schema
 
