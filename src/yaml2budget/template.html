@@ -96,6 +96,12 @@ svg.tracing .node.on rect.card { stroke: var(--accent); }
 .node text { fill: var(--ink2); font-size: 12px; font-variant-numeric: tabular-nums; }
 .node text.name { fill: var(--ink); font-weight: 600; font-size: 13px; }
 .node text.st { fill: currentColor; font-weight: 600; }
+.node text.lbl { fill: var(--ink3); font-size: 11px; }
+.node text.val { fill: var(--ink); }
+.node .rule { stroke: var(--grid); stroke-width: 1; }
+.legend rect { fill: var(--surface); stroke: var(--line); }
+.legend text { fill: var(--ink2); font-size: 11px; }
+.legend text.f { fill: var(--ink); font-size: 12px; font-weight: 600; }
 .badge rect { fill: var(--surface); stroke: var(--ink3); }
 .badge text { fill: var(--ink2); font-size: 10px; text-anchor: middle; }
 .more { fill: var(--ink3); font-size: 11px; }
@@ -160,6 +166,8 @@ td.x { color: var(--ink2); font-weight: 400 !important; }
     <input type="range" id="slider" min="0" value="0" aria-label="wavelength">
     <span class="end" id="wlHi"></span><output id="wlv"></output></label>
   <div class="tools">
+    <div class="seg" id="orient" title="Direction of the roll-up">
+      <button data-o="horizontal" title="Total on the left, terms to the right">Horizontal</button><button data-o="vertical" title="Total on top, terms below">Vertical</button></div>
     <button class="btn" id="logy" aria-pressed="false" title="Logarithmic y axis">Log y</button>
     <details class="cols" id="cols"><summary class="btn" title="Show or hide extra columns">Columns ▾</summary><div></div></details>
     <button class="btn" id="expand" title="Expand every subsystem">Expand</button>
@@ -180,6 +188,7 @@ td.x { color: var(--ink2); font-weight: 400 !important; }
 </main>
 <script>
 const BUDGETS = /*DATA*/;
+const META = /*META*/;   // provenance stamped on the exports: built, commit, dirty, version
 const OPS = {product: ['×', 'product'], rss: ['√Σ²', 'RSS'], sum: ['Σ', 'sum'],
              inverse_rss: ['1/RSS', 'inverse RSS']};
 // Pill labels sit on a baseline 0.35em below the pill's centre (svg2pdf ignores dominant-baseline).
@@ -189,7 +198,8 @@ const REPEATS = {product: (v, k) => v ** k, sum: (v, k) => v * k, rss: (v, k) =>
                  inverse_rss: (v, k) => v / Math.sqrt(k)};
 const times = n => '×' + +n.count.toPrecision(4);
 const countWidth = n => 14 + 7.2 * times(n).length;
-const S = {b: 0, i: 0, view: 'table', theme: 'auto', closed: BUDGETS.map(() => new Set()), hide: BUDGETS.map(() => new Set())};
+const S = {b: 0, i: 0, view: 'table', theme: 'auto', closed: BUDGETS.map(() => new Set()), hide: BUDGETS.map(() => new Set()),
+           orient: BUDGETS.map(b => b.orientation)};
 try { S.theme = localStorage.getItem('pb-theme') || 'auto'; } catch {}   // per-viewer, optional
 const $ = s => document.querySelector(s);
 const css = k => getComputedStyle(document.documentElement).getPropertyValue(k).trim();
@@ -223,11 +233,11 @@ const at = (v, j = S.i) => Array.isArray(v) ? v[j] : v;
 const fmt = x => x == null ? '–' : (x !== 0 && (Math.abs(x) >= 1e5 || Math.abs(x) < 1e-3)) ? x.toExponential(2) : String(+x.toPrecision(4));
 const pct = m => m == null ? '–' : (m >= 0 ? '+' : '−') + Math.abs(100 * m).toFixed(1) + '%';
 const isVec = n => Array.isArray(n.cbe) || Array.isArray(n.alloc);
-// Margin is the fraction of the allocation left over (positive = meets allocation).
+// Margin is the difference (below) relative to the allocation, or to the CBE with `margin_basis: cbe`
+// (positive = meets allocation).
 function margin(n, j = S.i) {
   if (n.alloc == null) return null;
-  const c = at(n.cbe, j), a = at(n.alloc, j);
-  return B().better === 'higher' ? c / a - 1 : 1 - c / a;
+  return diff(n, j) / at(B().basis === 'cbe' ? n.cbe : n.alloc, j);
 }
 // Worst margin over the grid: [margin, index].
 function worst(n) {
@@ -284,7 +294,8 @@ function renderTable() {
   const u = b.u ? ` [${esc(b.u)}]` : '', L = narrow() ? 1 : depth;   // one indented column on a phone
   const cols = b.columns.filter(k => !S.hide[S.b].has(k));
   const head = [...Array(L)].map((_, d) => `<th>${esc(narrow() ? b.levels[0] ?? 'Item' : b.levels[d] ?? 'Level ' + d)}</th>`).join('')
-    + (narrow() ? '' : '<th>Roll-up</th>') + `<th class="num">CBE${u}</th><th class="num">Alloc${u}</th><th class="num">Margin (% · Δ${u})</th>`
+    + (narrow() ? '' : '<th>Roll-up</th>') + `<th class="num">CBE${u}</th><th class="num">${esc(b.alloc_label)}${u}</th>`
+    + `<th class="num" title="${esc(`Margin = ${marginDef().frac}; Δ = ${marginDef().diff}`)}">Margin (% · Δ${u})</th>`
     + (vec ? '<th class="num">Worst in band</th><th>CBE vs λ</th>' : '')
     + '<th>Notes</th>' + cols.map(k => `<th><code>${esc(k)}</code></th>`).join('');
   const rows = b.nodes.map((n, i) => {
@@ -305,66 +316,168 @@ function renderTable() {
   $('#table').innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
-// Left-to-right tidy tree: leaves (or collapsed nodes) take successive rows; parents center on their children.
-// `key` adds a line above the diagram naming the budget and λ (for exports).
-function renderFlow(key = false) {
-  const b = B(), W = 260, H = 74, GX = 72 + Math.max(0, ...b.nodes.filter(counted).map(countWidth)) * (2 / 3), GY = 12, pos = {};
+// The margin definition in words (flowchart legend, table header), e.g. "(Alloc − CBE) / Alloc".
+function marginDef() {
+  const b = B(), a = b.alloc_label, d = b.better === 'higher' ? `CBE − ${a}` : `${a} − CBE`;
+  return {frac: `(${d}) / ${b.basis === 'cbe' ? 'CBE' : a}`, diff: d};
+}
+
+// A flowchart card: the name, then a small table of allocation, CBE and margin; on the right the
+// sparkline of a wavelength-dependent term over the margin bar (aligned with the margin row).
+const CARD = {W: 300, H: 90, head: 30, row: 20, val: 70, side: 96};
+function card(n) {
+  const b = B(), {W, H, head, row, val, side} = CARD, m = margin(n), [, ic] = status(m), has = n.alloc != null;
+  const name = n.name.length > 36 ? n.name.slice(0, 35) + '…' : n.name, u = b.u ? ' ' + esc(b.u) : '';
+  const rows = [[b.alloc_label, has ? fmt(at(n.alloc)) + u : '–', 'val'], ['CBE', fmt(at(n.cbe)) + u, 'val'],
+                ['Margin', has ? `${ic} ${pct(m)} · ${signed(diff(n))}` : '–', has ? 'st' : 'val']];
+  // Margin bar: the tick is zero margin; spare allocation grows right, an overrun left; ends are ±100%.
+  const half = 44, zero = W - side + half, len = has ? half * Math.min(1, Math.abs(m)) : 0, by = head + 2.5 * row;
+  return `<rect class="card" width="${W}" height="${H}" rx="10"/>`
+    + `<text class="name" x="12" y="20">${esc(name)}</text>`
+    + `<line class="rule" x1="0" x2="${W}" y1="${head}" y2="${head}"/>`
+    + `<line class="rule" x1="${val - 8}" x2="${val - 8}" y1="${head}" y2="${H}"/>`
+    + rows.map(([label, v, cls], k) => { const top = head + k * row;
+        return (k ? `<line class="rule" x1="0" x2="${W - side - 8}" y1="${top}" y2="${top}"/>` : '')
+          + `<text class="lbl" x="12" y="${top + 14}">${esc(label)}</text><text class="${cls}" x="${val}" y="${top + 14}">${v}</text>`; }).join('')
+    + (isVec(n) ? spark(n, 88, 26, `x="${W - side}" y="${head + 4}"`) : '')
+    + (has ? `<rect x="${W - side}" y="${by - 2}" width="${2 * half}" height="4" rx="2" fill="var(--grid)"/>`
+        + `<rect class="bar" x="${(m < 0 ? zero - len : zero).toFixed(1)}" y="${by - 2}" width="${len.toFixed(1)}" height="4"/>`
+        + `<rect class="zero" x="${zero - 0.75}" y="${by - 6}" width="1.5" height="12"/>` : '');
+}
+
+// Layouts return card corners `pos`, roll-up badge centres `badge`, ×N bubble centres `count` and
+// edge paths, all keyed by term index. An open node is drawn with its children, a closed one
+// (collapsed, with its badge and +N on its right) or a leaf is terminal.
+const isOpen = (b, i) => b.nodes[i].kids.length > 0 && !S.closed[S.b].has(i);
+const moreWidth = (b, i) => S.closed[S.b].has(i) ? 6 + 7 * String(b.nodes[i].kids.length).length + 7 : 0;
+const sideBadge = (b, i, p) => [p.x + CARD.W + 12, p.y + CARD.H / 2];
+
+// Left to right: leaves (or collapsed nodes) take successive rows; parents center on their children.
+function layoutH(b) {
+  const {W, H} = CARD, GX = 72 + Math.max(0, ...b.nodes.filter(counted).map(countWidth)) * (2 / 3), GY = 12;
+  const pos = {}, badge = {}, count = {}, edges = [];
   let y = 0;
   (function place(i) {
     const n = b.nodes[i], x = n.depth * (W + GX);
-    if (n.kids.length && !S.closed[S.b].has(i)) {
+    if (isOpen(b, i)) {
       n.kids.forEach(place);
       pos[i] = {x, y: (pos[n.kids[0]].y + pos[n.kids.at(-1)].y) / 2};
     } else { pos[i] = {x, y}; y += H + GY; }
   })(0);
-  const ids = Object.keys(pos).map(Number);      // a collapsed card still shows its badge and +N
-  const more = i => S.closed[S.b].has(i) ? 6 + 7 * String(b.nodes[i].kids.length).length + 7 : 0;
-  const w = Math.max(...ids.map(i => pos[i].x + W + (b.nodes[i].kids.length ? 12 + badgeWidth(b.nodes[i]) / 2 : 0) + more(i))) + 4;
-  const edges = ids.filter(i => b.nodes[i].parent != null).map(i => {
-    const parent = b.nodes[b.nodes[i].parent], p = pos[b.nodes[i].parent], c = pos[i];
-    const x1 = p.x + W + 14 + badgeWidth(parent) / 2, y1 = p.y + H / 2;
-    const x2 = c.x, y2 = c.y + H / 2, xm = (x1 + x2) / 2;
-    return `<path class="edge" data-i="${i}" d="M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}"/>`;
-  }).join('');
-  const counts = ids.filter(i => counted(b.nodes[i])).map(i => {    // ×N where the term flows up
-    const n = b.nodes[i], cw = countWidth(n), {x, y: yy} = pos[i];
-    return `<g class="count" data-i="${i}" transform="translate(${x - 6 - cw / 2},${yy + H / 2})"><title>${esc(countText(n))}</title>`
-      + `<rect x="${-cw / 2}" y="-11" width="${cw}" height="22" rx="11"/><text y="4.2">${times(n)}</text></g>`;
-  }).join('');
+  for (const i of Object.keys(pos).map(Number)) {
+    const n = b.nodes[i];
+    if (n.kids.length) badge[i] = sideBadge(b, i, pos[i]);
+    if (n.parent == null) continue;
+    const parent = b.nodes[n.parent], p = pos[n.parent], c = pos[i];
+    const x1 = p.x + W + 14 + badgeWidth(parent) / 2, y1 = p.y + H / 2, x2 = c.x, y2 = c.y + H / 2, xm = (x1 + x2) / 2;
+    edges.push({i, d: `M${x1},${y1} C${xm},${y1} ${xm},${y2} ${x2},${y2}`});
+    if (counted(n)) count[i] = [c.x - 6 - countWidth(n) / 2, c.y + H / 2];
+  }
+  return {pos, badge, count, edges};
+}
+
+// Top down, like a printed budget: a parent whose children are all terminal stacks them in an
+// indented column hung from a spine; otherwise its subtrees sit side by side under a bus line.
+function layoutV(b) {
+  const {W, H} = CARD, GX = 28, pos = {}, badge = {}, count = {}, edges = [];
+  const termW = i => W + (b.nodes[i].kids.length ? 14 + badgeWidth(b.nodes[i]) / 2 + moreWidth(b, i) : 0);
+  const cw = k => counted(b.nodes[k]) ? countWidth(b.nodes[k]) + 6 : 0;
+  // Places the subtree of i with its left edge at x0 and its top at y; returns its width.
+  (function place(i, x0, y) {
+    const n = b.nodes[i];
+    if (!isOpen(b, i)) {
+      pos[i] = {x: x0, y};
+      if (n.kids.length) badge[i] = sideBadge(b, i, pos[i]);
+      return termW(i);
+    }
+    if (n.kids.every(k => !isOpen(b, k))) {      // stacked column
+      const spine = x0 + Math.max(20, badgeWidth(n) / 2 + 4), ind = spine + 16 + Math.max(0, ...n.kids.map(cw));
+      pos[i] = {x: x0, y};
+      badge[i] = [spine, y + H + 12];
+      n.kids.forEach((k, r) => {
+        const top = y + H + 36 + r * (H + 12);
+        place(k, ind, top);
+        edges.push({i: k, d: `M${spine},${y + H + 23} V${top + H / 2} H${ind}`});
+        if (counted(b.nodes[k])) count[k] = [ind - 6 - countWidth(b.nodes[k]) / 2, top + H / 2];
+      });
+      return Math.max(W, ...n.kids.map(k => ind - x0 + termW(k)));
+    }
+    const gap = n.kids.some(k => counted(b.nodes[k])) ? 76 : 52, top = y + H + gap, bus = y + H + 36;
+    let x = x0;
+    for (const k of n.kids) x += place(k, x, top) + GX;
+    const centre = k => pos[k].x + W / 2, cx = (centre(n.kids[0]) + centre(n.kids.at(-1))) / 2;
+    pos[i] = {x: cx - W / 2, y};
+    badge[i] = [cx, y + H + 12];
+    for (const k of n.kids) {
+      edges.push({i: k, d: `M${cx},${y + H + 23} V${bus} H${centre(k)} V${top}`});
+      if (counted(b.nodes[k])) count[k] = [centre(k), top - 17];
+    }
+    return x - GX - x0;
+  })(0, 0, 0);
+  return {pos, badge, count, edges};
+}
+
+// The margin definition, drawn as a small box in the diagram's top-left corner.
+function legend() {
+  const b = B(), d = marginDef();
+  const lines = [['f', `Margin = ${d.frac}`], ['', `Δ = ${d.diff}${b.u ? ` [${b.u}]` : ''}; positive = CBE meets ${b.alloc_label}`],
+                 ['', 'Bar: tick = 0 margin, ends = ±100%']];
+  const w = 20 + 6.3 * Math.max(...lines.map(([, t]) => t.length)), h = 10 + 17 * lines.length;
+  return {w, h, svg: x => `<g class="legend" transform="translate(${x[0]},${x[1]})"><rect width="${w.toFixed(0)}" height="${h}" rx="8"/>`
+    + lines.map(([c, t], k) => `<text class="${c}" x="10" y="${22 + 17 * k}">${esc(t)}</text>`).join('') + '</g>'};
+}
+
+// The flowchart: horizontal or vertical layout, cards, badges, ×N bubbles and the margin legend.
+// `key` adds a line above the diagram naming the budget and λ (for exports).
+function renderFlow(key = false) {
+  const b = B(), {W, H} = CARD, vertical = S.orient[S.b] === 'vertical';
+  const {pos, badge, count, edges} = (vertical ? layoutV : layoutH)(b);
+  const ids = Object.keys(pos).map(Number);
+  // Extent of everything drawn, so the diagram can be moved to start at 0, 0.
+  const boxes = [...ids.map(i => [pos[i].x, pos[i].y, W, H]),
+    ...Object.entries(badge).map(([i, [x, y]]) => [x - badgeWidth(b.nodes[i]) / 2, y - 11, badgeWidth(b.nodes[i]) + moreWidth(b, +i), 22]),
+    ...Object.entries(count).map(([i, [x, y]]) => [x - countWidth(b.nodes[i]) / 2, y - 11, countWidth(b.nodes[i]), 22])];
+  const x0 = Math.min(...boxes.map(r => r[0])), y0 = Math.min(...boxes.map(r => r[1]));
+  const cw = Math.max(...boxes.map(r => r[0] + r[2])) - x0, ch = Math.max(...boxes.map(r => r[1] + r[3])) - y0;
+  // The legend sits in the top-left corner when that is empty, else in a band above the diagram.
+  const lg = legend(), pad = 16;
+  const free = boxes.every(([x, y, w, h]) => x - x0 >= lg.w + pad || y - y0 >= lg.h + pad);
+  const top = key ? 30 : 0, dy = top + (free ? 0 : lg.h + pad);
+  const w = Math.ceil(Math.max(cw, lg.w) + 4), h = Math.ceil(ch + dy + 4);
+  const T = ([x, y]) => [x - x0, y - y0 + dy];   // layout -> drawing coordinates
   const nodes = ids.map(i => {
-    const n = b.nodes[i], {x, y: yy} = pos[i], m = margin(n), [cls, ic] = status(m), closed = S.closed[S.b].has(i);
-    const wide = !isVec(n) && n.alloc == null, lim = wide ? 32 : 20;   // leave room for the sparkline / bar
-    const name = n.name.length > lim ? n.name.slice(0, lim - 1) + '…' : n.name;
-    // Margin bar: the tick is zero margin; spare allocation grows right, an overrun left; ends are ±100%.
-    const half = 44, zero = W - 100 + half, len = n.alloc == null ? 0 : half * Math.min(1, Math.abs(m));
-    return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${yy})"><title>${esc([n.name, counted(n) ? countText(n) : '', n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
-      + `<rect class="card" width="${W}" height="${H}" rx="10"/>`
-      + `<text class="name" x="12" y="22">${esc(name)}</text>`
-      + `<text x="12" y="41">CBE ${fmt(at(n.cbe))}${n.alloc != null ? ' / ' + fmt(at(n.alloc)) : ''} ${esc(b.u)}</text>`
-      + `<text class="st" x="12" y="62">${ic} ${n.alloc != null ? pct(m) + ' · ' + signed(diff(n)) : ''}</text>`
-      + (isVec(n) ? spark(n, 88, 26, `x="${W - 100}" y="18"`) : '')
-      + (n.alloc != null ? `<rect x="${W - 100}" y="56" width="${2 * half}" height="4" rx="2" fill="var(--grid)"/>`
-          + `<rect class="bar" x="${(m < 0 ? zero - len : zero).toFixed(1)}" y="56" width="${len.toFixed(1)}" height="4"/>`
-          + `<rect class="zero" x="${zero - 0.75}" y="52" width="1.5" height="12"/>` : '')
-      + (n.kids.length ? `<g class="badge" transform="translate(${W + 12},${H / 2})">`
-          + `<rect x="${-badgeWidth(n) / 2}" y="-11" width="${badgeWidth(n)}" height="22" rx="11"/>`
-          + `<text y="3.5">${esc(OPS[n.op][0])}</text></g>` : '')
-      + (closed ? `<text class="more" x="${W + 12 + badgeWidth(n) / 2 + 6}" y="${H / 2 + 4}">+${n.kids.length}</text>` : '')
+    const n = b.nodes[i], [x, y] = T([pos[i].x, pos[i].y]), [cls] = status(margin(n)), closed = S.closed[S.b].has(i);
+    const bw = badgeWidth(n), [bx, by] = n.kids.length ? [badge[i][0] - pos[i].x, badge[i][1] - pos[i].y] : [0, 0];
+    return `<g class="node ${cls}${n.kids.length ? ' roll' : ''}" data-i="${i}" transform="translate(${x},${y})"><title>${esc([n.name, counted(n) ? countText(n) : '', n.notes, ...Object.entries(n.extra).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join('\n'))}</title>`
+      + card(n)
+      + (n.kids.length ? `<g class="badge" transform="translate(${bx},${by})">`
+          + `<rect x="${-bw / 2}" y="-11" width="${bw}" height="22" rx="11"/><text y="3.5">${esc(OPS[n.op][0])}</text></g>` : '')
+      + (closed ? `<text class="more" x="${bx + bw / 2 + 6}" y="${by + 4}">+${n.kids.length}</text>` : '')
       + '</g>';
   }).join('');
-  const top = key ? 30 : 0, h = y + top;
+  const counts = Object.entries(count).map(([i, c]) => {    // ×N where the term flows up
+    const n = b.nodes[i], bw = countWidth(n), [x, y] = T(c);
+    return `<g class="count" data-i="${i}" transform="translate(${x},${y})"><title>${esc(countText(n))}</title>`
+      + `<rect x="${-bw / 2}" y="-11" width="${bw}" height="22" rx="11"/><text y="4.2">${times(n)}</text></g>`;
+  }).join('');
   $('#flow').innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
     + (key ? `<text class="key" x="0" y="14">${esc(b.name)}${b.grid ? ` · evaluated at λ = ${esc(wlText(S.i))}` : ''}</text>` : '')
-    + `<g transform="translate(0,${top})">${edges}${counts}${nodes}</g></svg>`;
+    + lg.svg([0, top])
+    + `<g transform="translate(${-x0},${dy - y0})">${edges.map(e => `<path class="edge" data-i="${e.i}" d="${e.d}"/>`).join('')}</g>`
+    + counts + nodes + '</svg>';
   if (!key) trace(S.trace);                      // keep the hovered trace across re-renders
   if (narrow()) {                                // a phone either fits the diagram on screen,
     const view = $('#flow'), room = view.clientWidth - 16;   // or opens it at the root card
+    const [rx, ry] = T([pos[0].x, pos[0].y]);
     if (room / w >= 0.6) {
       const svg = view.querySelector('svg');
       svg.setAttribute('width', room);
-      svg.setAttribute('height', Math.round(y * room / w));
+      svg.setAttribute('height', Math.round(h * room / w));
+    } else if (vertical) {
+      view.scrollTop = 0;
+      view.scrollLeft = Math.max(0, rx - (room - W) / 2);
     } else {
-      view.scrollTop = Math.max(0, pos[0].y - 24);
+      view.scrollTop = Math.max(0, ry - 24);
       view.scrollLeft = 0;
     }
   }
@@ -559,7 +672,7 @@ function exportXLSX() {
   const cols = b.columns.filter(k => !S.hide[S.b].has(k));
   const depth = Math.max(...b.nodes.map(n => n.depth)) + 1, qty = b.nodes.some(counted);
   const head = [...Array(depth)].map((_, d) => b.levels[d] ?? `Level ${d}`).concat(
-    ['Roll-up'], qty ? ['Count'] : [], [`CBE${unit}`, `Alloc${unit}`, 'Margin', `Margin Δ${unit}`],
+    ['Roll-up'], qty ? ['Count'] : [], [`CBE${unit}`, `${b.alloc_label}${unit}`, `Margin ${marginDef().frac}`, `Margin Δ${unit}`],
     b.grid ? ['Worst in band', `Worst at [${b.wu}]`] : [], ['Notes'], cols);
   const rows = b.nodes.map(n => {
     const [wm, wj] = worst(n), cells = [...Array(depth)].map(() => ['', 'text']);
@@ -572,7 +685,7 @@ function exportXLSX() {
   });
   const sheets = [{
     name: sheetName(b.name), head, rows,
-    title: `${b.name}${b.grid ? ` — evaluated at λ = ${wlText(S.i)}` : ''}  ·  exported ${new Date().toISOString().slice(0, 10)}`,
+    title: `${b.name}${b.grid ? ` — evaluated at λ = ${wlText(S.i)}` : ''}  ·  ${stamp()}`,
     widths: [...Array(depth).fill(20), 10, ...(qty ? [8] : []), 14, 14, 11, 14, ...(b.grid ? [13, 14] : []), 46, ...cols.map(() => 24)],
   }];
   if (b.grid) {                                  // second sheet: every term over the full band
@@ -592,6 +705,14 @@ function exportXLSX() {
        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
+// Provenance line for the exports: when this file was made, from which commit of the inputs.
+function stamp() {
+  const now = new Date(), two = k => String(k).padStart(2, '0');
+  const date = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}:${two(now.getMinutes())}`;
+  const src = META.commit ? `inputs at git ${META.commit}${META.dirty ? ' + uncommitted changes' : ''}` : 'inputs not under git';
+  return `Generated ${date} · ${src} · page built ${META.built.slice(0, 16).replace('T', ' ')} · yaml2budget ${META.version}`;
+}
+
 const save = (data, name, type) => {
   const blob = data instanceof Blob ? data : new Blob([data], {type});
   const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(blob), download: name});
@@ -604,7 +725,7 @@ const slug = t => t.replace(/[^\w.-]+/g, '_');
 const FONT_CDN = 'https://cdn.jsdelivr.net/npm/dejavu-fonts-ttf@2.37.3/ttf/DejaVuSans';
 const MARKS = {'✓ ': '', '✕ ': 'X ', '▲ ': '! ', '−': '-', '–': '-'};   // glyphs no PDF face carries
 const ASCII = {...MARKS, '√Σ²': 'RSS', 'Σ': 'sum', '∏': 'prod', '×': 'x',
-  'µ': 'u', 'λ': 'lambda', 'σ': 'sigma', '·': '-', '→': '->'};
+  'µ': 'u', 'λ': 'lambda', 'σ': 'sigma', 'Δ': 'd', '·': '-', '→': '->'};
 const sub = (t, map) => Object.entries(map).reduce((s, [k, v]) => s.split(k).join(v), t);
 const b64 = buf => { let s = ''; new Uint8Array(buf).forEach(c => s += String.fromCharCode(c)); return btoa(s); };
 let fontsOnce;
@@ -630,12 +751,14 @@ function inlineStyles(src) {
 
 // Vector PDF, downloaded directly (no print dialog): svg2pdf draws into a jsPDF page of the same size.
 // The drawing is mounted off-screen because svg2pdf measures it in the document.
+// A footer line with stamp() is written under the drawing.
 async function svgToPDF(svg, w, h, name) {
   const markup = typeof svg === 'string';
   if (!window.jspdf?.jsPDF || !window.svg2pdf) return save(markup ? svg : svg.outerHTML, name + '.svg', 'image/svg+xml');
   const host = document.body.appendChild(Object.assign(document.createElement('div'), {style: 'position:fixed;left:-10000px;top:0'}));
   if (markup) host.innerHTML = svg; else host.appendChild(inlineStyles(svg));   // Plotly's SVG is already self-contained
-  const pt = 0.75, doc = new jspdf.jsPDF({unit: 'pt', format: [w * pt, h * pt], orientation: w > h ? 'l' : 'p'}), f = await pdfFonts();
+  const pt = 0.75, foot = 18, f = await pdfFonts();
+  const doc = new jspdf.jsPDF({unit: 'pt', format: [w * pt, h * pt + foot], orientation: w > h * pt + foot ? 'l' : 'p'});
   for (const [style, data] of Object.entries(f || {})) { doc.addFileToVFS(`pb-${style}.ttf`, data); doc.addFont(`pb-${style}.ttf`, 'PB', style); }
   host.querySelectorAll('*').forEach(el => {
     if (f) el.style.fontFamily = 'PB';
@@ -645,7 +768,12 @@ async function svgToPDF(svg, w, h, name) {
   const map = f ? MARKS : ASCII;                 // without a Unicode face, fall back to ASCII throughout
   const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
   for (let t; (t = walk.nextNode());) t.nodeValue = f ? sub(t.nodeValue, map) : unpowers(sub(t.nodeValue, map));
-  try { await doc.svg(host.firstElementChild, {x: 0, y: 0, width: w * pt, height: h * pt}); doc.save(name + '.pdf'); }
+  try {
+    await doc.svg(host.firstElementChild, {x: 0, y: 0, width: w * pt, height: h * pt});
+    doc.setFont(f ? 'PB' : 'helvetica', 'normal').setFontSize(7).setTextColor(120);
+    doc.text(f ? sub(stamp(), MARKS) : sub(stamp(), ASCII), 4, h * pt + foot - 6);
+    doc.save(name + '.pdf');
+  }
   finally { host.remove(); }
 }
 
@@ -684,7 +812,8 @@ function exportYAML() {
     if (n.kids.length) L.push(p + 'children:', ...n.kids.map(k => node(k, p + '  ', true)));
     return L.join('\n');
   };
-  const text = [`# yaml2budget export of ${b.name}` + (b.grid ? `, evaluated at λ = ${wlText(S.i)}` : '') + ` (${new Date().toISOString().slice(0, 10)})`,
+  const text = [`# yaml2budget export of ${b.name}` + (b.grid ? `, evaluated at λ = ${wlText(S.i)}` : ''), `# ${stamp()}`,
+    `# margin_frac = ${marginDef().frac}`,
     `units: ${q(b.units)}`, `better: ${q(b.better)}`,
     node(0, '', false), ''].filter(v => v != null).join('\n');
   save(text, slug(b.name + (b.grid ? '_' + fmt(b.grid[S.i]) + b.wl_units : '')) + '.yaml', 'text/yaml');
@@ -708,7 +837,7 @@ function renderSummary() {
 }
 
 // Which tool belongs to which view.
-const TOOLS = {logy: ['plot'], cols: ['table'], expand: ['table', 'flow'], collapse: ['table', 'flow'],
+const TOOLS = {orient: ['flow'], logy: ['plot'], cols: ['table'], expand: ['table', 'flow'], collapse: ['table', 'flow'],
   exYaml: ['table'], exXlsx: ['table'], exPdf: ['flow', 'plot'], exPng: ['plot']};
 const THEME_ICON = {auto: '◐', light: '☀', dark: '☾'};
 
@@ -736,8 +865,9 @@ function render() {
   $('#theme').title = `Theme: ${S.theme} (click to change)`;
   $('#cols div').innerHTML = b.columns.map(k => `<label><input type="checkbox" value="${esc(k)}"${S.hide[S.b].has(k) ? '' : ' checked'}><code>${esc(k)}</code></label>`).join('');
   $('#logy').setAttribute('aria-pressed', !!S.log);
+  document.querySelectorAll('#orient button').forEach(e => e.setAttribute('aria-pressed', e.dataset.o === S.orient[S.b]));
   $('#hint').textContent = {table: 'Click ▾ to collapse a subsystem. Parent rows are roll-ups of their children; ×N marks a term counted N times. Export YAML writes the values at the current λ.',
-    flow: 'Hover a node to trace it up to the total and down to its terms; click it to collapse/expand. A ×N bubble marks a term that enters its parent N times. Bars show the margin: right of the tick is allocation to spare, left is an overrun; the ends are ±100%. Export PDF saves the diagram as a vector PDF.',
+    flow: 'Hover a node to trace it up to the total and down to its terms; click it to collapse/expand. A ×N bubble marks a term that enters its parent N times. Horizontal / Vertical sets the direction of the roll-up. The box in the corner defines the margin. Bars show the margin: right of the tick is allocation to spare, left is an overrun; the ends are ±100%. Export PDF saves the diagram as a vector PDF.',
     plot: 'Click legend entries to toggle components; double-click to isolate. Click the plot to set λ.'}[S.view]
     + (b.grid ? '  ← / → step the wavelength.' : '');
   renderSummary();
@@ -761,6 +891,7 @@ $('#flow').onpointerover = e => { const t = e.target.closest('[data-i]'); trace(
 $('#flow').onpointerleave = () => trace(null);
 $('#flow').onclick = e => { const g = e.target.closest('.node'); if (g && B().nodes[g.dataset.i].kids.length) toggle(+g.dataset.i); };
 $('#logy').onclick = () => { S.log = !S.log; render(); };
+$('#orient').onclick = e => { if (e.target.dataset.o) { S.orient[S.b] = e.target.dataset.o; render(); } };
 $('#cols div').onchange = e => { const h = S.hide[S.b], k = e.target.value; e.target.checked ? h.delete(k) : h.add(k); render(); };
 $('#exYaml').onclick = exportYAML;
 $('#exXlsx').onclick = exportXLSX;

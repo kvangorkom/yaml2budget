@@ -13,7 +13,7 @@ pip install "yaml2budget[export]" && playwright install chromium
 yaml2budget examples --export exports --wavelength 550   # + PDF/Excel/YAML/PNG files, see below
 
 python examples/make_data.py              # regenerate the example CSVs
-python -m unittest discover -s tests -v   # 84 tests
+python -m unittest discover -s tests -v   # 90 tests
 ```
 
 The same thing from Python:
@@ -29,10 +29,14 @@ open('budgets.html', 'w').write(render(pages))
 
 `yaml2budget.budget` parses, resamples and rolls up; `yaml2budget/template.html` holds all CSS/JS and
 takes the data at `/*DATA*/`. The page has three views: **Table** (hierarchy as columns, roll-ups
-as shaded rows), **Flowchart** (left-to-right tree; each card with an allocation has a margin bar:
-the tick is zero, spare allocation grows right, an overrun grows left, the ends are ±100%;
-hovering a card traces its path up to the total and down to every term below it), and **Spectrum** (Plotly, vector budgets
-only). A λ slider drives the table and flowchart; clicking the plot also sets λ. Wavelength-dependent
+as shaded rows), **Flowchart** (a tree of cards; each card spells out its allocation, CBE and
+margin in a small table, and a card with an allocation has a margin bar: the tick is zero, spare
+allocation grows right, an overrun grows left, the ends are ±100%; hovering a card traces its path
+up to the total and down to every term below it), and **Spectrum** (Plotly, vector budgets
+only). The flowchart rolls up **horizontally** (total on the left) or **vertically** (total on top,
+like a printed error budget: a parent whose terms are all leaves stacks them in an indented column);
+the Horizontal / Vertical buttons switch it, and `orientation:` sets the default per budget. A box
+in the diagram's top-left corner states the margin definition (see `margin_basis`). A λ slider drives the table and flowchart; clicking the plot also sets λ. Wavelength-dependent
 entries carry a sparkline in both the table and the flowchart cards. Margins are shown as a
 percentage of the allocation and as a difference in budget units.
 
@@ -56,8 +60,15 @@ writer is built in, no library):
 |---|---|---|
 | Export YAML | table | the tree with the values at the current λ, in the input schema (re-readable by `yaml2budget.py`) |
 | Export Excel | table | a formatted .xlsx: the table at the current λ, plus a *Spectrum* sheet of every term over the band |
-| Export PDF | flowchart | a one-page vector PDF the size of the diagram, downloaded directly |
+| Export PDF | flowchart | a one-page vector PDF the size of the diagram, downloaded directly, with the margin legend |
 | Export PDF / PNG | spectrum | the same for the plot, or a 2× PNG; both always drawn in light colors |
+
+Every PDF has a footer line with the date and time it was generated, the git commit of the
+inputs (the short hash of `HEAD` in the repository holding the YAML directory, flagged
+"+ uncommitted changes" when files under that directory differ from it; "inputs not under git"
+otherwise), when the page was built and the yaml2budget version. The Excel title row and the
+YAML header comment carry the same line. From Python, pass `meta=yaml2budget.provenance(directory)`
+to `render` to get the commit; without it the stamp has only the build time and version.
 
 The exported YAML carries `margin` (difference) and `margin_frac` alongside each `cbe`/`alloc`;
 re-reading it recomputes both and warns, so a stale export can never masquerade as input.
@@ -112,6 +123,9 @@ collapsed behind its first line. Extras also appear in the flowchart hover text.
 | `views` | root | which views to offer: `table` · `flowchart` · `spectrum`. Default all three |
 | `margin`, `margin_frac` | any node | replaced by the computed margin (warning printed); written by the YAML export |
 | `margin_warn` | root | margin fraction below which a pass is flagged ▲ (default 0.1) |
+| `margin_basis` | root | what the fractional margin is relative to: `alloc` (default, (Alloc − CBE)/Alloc) or `cbe` ((Alloc − CBE)/CBE); signs flip for `better: higher` |
+| `alloc_label` | root | what the allocation is called in the flowchart, table and Excel headers, e.g. `Req` (default `Alloc`) |
+| `orientation` | root | flowchart roll-up direction: `horizontal` (default) or `vertical` |
 | `derived` | root | list of `{name, units, scale, alloc, invert, rollup, better}` budgets computed from this one |
 
 **Values** are a number, a CSV path (relative to the YAML; columns `wavelength, value`;
@@ -146,8 +160,9 @@ scaled top-level allocation.
 - Tables are linearly interpolated onto the grid; values beyond a table's range are held
   constant (a warning is printed).
 - All entries in a budget share one unit; no unit conversion is done.
-- Margin = `1 − CBE/alloc` (lower is better) or `CBE/alloc − 1` (higher is better).
-  "Worst in band" is the minimum margin over the grid.
+- Margin = `(alloc − CBE)/alloc` (lower is better) or `(CBE − alloc)/alloc` (higher is
+  better); with `margin_basis: cbe` the denominator is the CBE instead. Positive always means
+  the allocation is met. "Worst in band" is the minimum margin over the grid.
 - Derived budgets assume a roll-up that scales linearly (`rss`, `sum`); scaling a
   `product` budget does not give a meaningful result.
 - A multi-channel instrument should use one YAML per channel (each has one grid).

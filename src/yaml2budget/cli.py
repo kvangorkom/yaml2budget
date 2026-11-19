@@ -3,7 +3,7 @@ import argparse
 import pathlib
 import sys
 
-from .budget import ROLLUPS, encode_fonts, load_all, render
+from .budget import ROLLUPS, encode_fonts, load_all, provenance, render
 from .headless import FORMATS, export
 
 
@@ -34,7 +34,8 @@ def main(argv=None):
         sys.exit(f'error: {error}')
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render(pages, args.inline or (),
-                               encode_fonts(args.font) if args.font else None))
+                               encode_fonts(args.font) if args.font else None,
+                               provenance(args.dir)))
     print(f'wrote {args.out}: ' + ', '.join(page['name'] for page in pages))
     if args.export:
         try:

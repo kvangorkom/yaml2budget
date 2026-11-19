@@ -305,6 +305,25 @@ class Margins(unittest.TestCase):
         np.testing.assert_allclose(difference, [2.0, -1.0])
         np.testing.assert_allclose(fraction, [0.5, -0.25])
 
+    def test_margin_relative_to_the_cbe(self):
+        difference, fraction = pb.margins(cbe=8.0, alloc=10.0, better='lower', basis='cbe')
+        self.assertAlmostEqual(difference, 2.0)
+        self.assertAlmostEqual(fraction, 0.25)                    # (10 - 8) / 8
+        _, fraction = pb.margins(cbe=0.6, alloc=0.5, better='higher', basis='cbe')
+        self.assertAlmostEqual(fraction, 0.1 / 0.6)
+
+    def test_margin_basis_reaches_the_page_and_is_checked(self):
+        budget, _, _ = build('name: T\nmargin_basis: cbe\nchildren: [{name: A, cbe: 1}]\n')
+        self.assertEqual(pb.flatten(budget, None)['basis'], 'cbe')
+        self.assertEqual(pb.flatten(budget, None)['columns'], [])
+        with self.assertRaises(ValueError):
+            build('name: T\nmargin_basis: total\nchildren: [{name: A, cbe: 1}]\n')
+
+    def test_replaced_margin_uses_the_basis(self):
+        _, _, warnings = build('name: T\nrollup: sum\nalloc: 10\nmargin_basis: cbe\n'
+                               'margin_frac: 0.5\nchildren: [{name: A, cbe: 8}]\n')
+        self.assertIn('replaced by computed 0.25', warnings)
+
     def test_no_allocation_gives_no_margin(self):
         self.assertEqual(pb.margins(1.0, None, 'lower'), (None, None))
 
@@ -534,6 +553,18 @@ children:
         self.assertEqual((self.page['units'], self.page['levels']), ('kg', ['System', 'Part']))
         self.assertEqual((self.page['better'], self.page['warn']), ('lower', 0.1))
 
+    def test_flowchart_settings_default_and_are_checked(self):
+        self.assertEqual((self.page['basis'], self.page['orientation'], self.page['alloc_label']),
+                         ('alloc', 'horizontal', 'Alloc'))
+        budget, _, _ = build('name: T\norientation: vertical\nalloc_label: Req\n'
+                             'children: [{name: A, cbe: 1}]\n')
+        page = pb.flatten(budget, None)
+        self.assertEqual((page['orientation'], page['alloc_label'], page['columns']),
+                         ('vertical', 'Req', []))
+        budget, _, _ = build('name: T\norientation: diagonal\nchildren: [{name: A, cbe: 1}]\n')
+        with self.assertRaises(ValueError):
+            pb.flatten(budget, None)
+
     def test_values_are_json_safe(self):
         json.dumps(self.page)                                        # raises on numpy types
         self.assertIsInstance(self.page['nodes'][0]['cbe'], float)
@@ -639,6 +670,28 @@ children: [{name: A, cbe: w.csv}, {name: B, cbe: 0.9}]
         html = pb.render(self.pages, inline=[library])
         self.assertIn('window.stub = 1;', html)
         self.assertNotIn(pb.CDN[0], html)
+
+    def test_provenance_is_embedded(self):
+        meta = json.loads(re.search(r'const META = (\{.*?\});', self.html).group(1))
+        self.assertEqual(meta['version'], pb.__version__)
+        self.assertIsNone(meta['commit'])
+        self.assertRegex(meta['built'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d')
+
+    def test_provenance_names_the_commit_of_the_inputs(self):
+        if not pb.budget.git('.', '--version'):
+            self.skipTest('git is not installed')
+        repo = pathlib.Path(tempfile.mkdtemp())
+        write(repo, 'a.yaml', 'name: A\nchildren: [{name: x, cbe: 1}]\n')
+        run = ['-c', 'user.name=t', '-c', 'user.email=t@t']
+        pb.budget.git(repo, 'init', '-q')
+        pb.budget.git(repo, 'add', '.')
+        pb.budget.git(repo, *run, 'commit', '-qm', 'x')
+        meta = pb.provenance(repo)
+        self.assertEqual(meta['commit'], pb.budget.git(repo, 'rev-parse', '--short', 'HEAD'))
+        self.assertFalse(meta['dirty'])
+        write(repo, 'a.yaml', 'name: A\nchildren: [{name: x, cbe: 2}]\n')
+        self.assertTrue(pb.provenance(repo)['dirty'])
+        self.assertIsNone(pb.provenance(tempfile.mkdtemp())['commit'])
 
     def test_closing_tags_in_the_data_cannot_end_the_script(self):
         page = dict(self.pages[0], description='</script><script>alert(1)</script>')

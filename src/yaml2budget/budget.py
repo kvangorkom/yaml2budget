@@ -7,9 +7,11 @@ result.
 """
 import base64
 import copy
+import datetime
 import importlib.resources
 import json
 import pathlib
+import subprocess
 import sys
 from functools import reduce
 
@@ -40,7 +42,9 @@ ALIASES = {'allocation': 'alloc', 'spec': 'alloc', 'description': 'notes',
            'multiplier': 'count', 'quantity': 'count'}
 NODE_KEYS = {'name', 'cbe', 'alloc', 'children', 'rollup', 'notes', 'count'}   # shown on their own
 BUDGET_KEYS = {'units', 'better', 'levels', 'wavelength', 'wavelength_units', 'margin_warn',
-               'derived', 'description', 'views'}
+               'derived', 'description', 'views', 'margin_basis', 'orientation', 'alloc_label'}
+MARGIN_BASES = ('alloc', 'cbe')                      # what the margin is a fraction of
+ORIENTATIONS = ('horizontal', 'vertical')            # flowchart roll-up direction
 VIEWS = {'table': 'table', 'flowchart': 'flow', 'spectrum': 'plot',   # YAML name -> page id
          'flow': 'flow', 'plot': 'plot'}
 MARGIN_KEYS = ('margin', 'margin_frac')
@@ -95,13 +99,17 @@ def make_grid(budget, tables):
     return np.arange(lo, hi + step / 2, step)
 
 
-def margins(cbe, alloc, better):
-    """(difference, fraction of the allocation) left; positive means the budget is met."""
+def margins(cbe, alloc, better, basis='alloc'):
+    """(difference, fraction) left; positive means the budget is met.
+
+    The fraction is the difference relative to the allocation (`basis='alloc'`, the default:
+    (alloc - cbe) / alloc) or to the CBE (`basis='cbe'`: (alloc - cbe) / cbe), with the sign
+    flipped for a higher-is-better budget.
+    """
     if alloc is None:
         return None, None
-    if better == 'higher':
-        return cbe - alloc, cbe / alloc - 1
-    return alloc - cbe, 1 - cbe / alloc
+    difference = cbe - alloc if better == 'higher' else alloc - cbe
+    return difference, difference / (cbe if basis == 'cbe' else alloc)
 
 
 def read_count(node, path, budget_name, is_root):
@@ -140,6 +148,7 @@ def evaluate(budget, src, default_rollup='rss'):
     grid = make_grid(budget, tables)
     better = budget.setdefault(
         'better', 'higher' if budget.get('rollup', default_rollup) in HIGHER_IS_BETTER else 'lower')
+    basis = margin_basis(budget)
 
     def warn(message):
         print(f'warning [{src.name}] {message}', file=sys.stderr)
@@ -168,7 +177,7 @@ def evaluate(budget, src, default_rollup='rss'):
             raise ValueError(f'{budget["name"]}: leaf "{path}" has no cbe')
         else:
             node['cbe'] = on_grid(node['cbe'])
-        for key, computed in zip(MARGIN_KEYS, margins(node['cbe'], node['alloc'], better)):
+        for key, computed in zip(MARGIN_KEYS, margins(node['cbe'], node['alloc'], better, basis)):
             if key in node:
                 replaced(path, key, node.pop(key), computed)
         return node['cbe']
@@ -199,6 +208,20 @@ def derive(budget, spec, grid, base):
             node['rollup'] = spec['rollup']
     out['alloc'] = spec.get('alloc', out['alloc'])
     return out
+
+
+def choice(budget, key, options):
+    """A budget setting that must be one of `options` (the first is the default)."""
+    value = budget.get(key, options[0])
+    if value not in options:
+        raise ValueError(f'{budget["name"]}: {key} must be one of {", ".join(options)}, '
+                         f'not {value!r}')
+    return value
+
+
+def margin_basis(budget):
+    """`margin_basis: alloc` (default) or `cbe`: what the fractional margin is relative to."""
+    return choice(budget, 'margin_basis', MARGIN_BASES)
 
 
 def rounded(value):
@@ -240,6 +263,8 @@ def flatten(budget, grid):
         description=budget.get('description', ''), better=budget['better'],
         warn=budget.get('margin_warn', 0.1), wl_units=budget.get('wavelength_units', 'nm'),
         grid=rounded(grid), views=page_views(budget), nodes=nodes,
+        basis=margin_basis(budget), orientation=choice(budget, 'orientation', ORIENTATIONS),
+        alloc_label=str(budget.get('alloc_label', 'Alloc')),
         columns=list(dict.fromkeys(key for node in nodes for key in node['extra'])))
 
 
@@ -287,25 +312,54 @@ def load_all(directory, default_rollup='rss'):
     return pages
 
 
+def git(directory, *args):
+    """Output of a git command run in `directory`, or None outside a repository / without git."""
+    try:
+        done = subprocess.run(['git', '-C', str(directory), *args], capture_output=True,
+                              text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def provenance(directory=None):
+    """Where the page came from, for the exports: build time, the inputs' git commit, version.
+
+    `commit` is the short hash of HEAD in the repository holding `directory` (None if it is not
+    in one); `dirty` is true when files under `directory` differ from that commit.
+    """
+    from . import __version__
+    commit = git(directory, 'rev-parse', '--short', 'HEAD') if directory else None
+    return dict(built=datetime.datetime.now().astimezone().isoformat(timespec='minutes'),
+                commit=commit, version=__version__,
+                dirty=bool(commit and git(directory, 'status', '--porcelain', '--', '.')))
+
+
 def encode_fonts(paths):
     """{style: base64 TTF} for the PDF export; the bold face falls back to the regular one."""
     encoded = [base64.b64encode(path.read_bytes()).decode() for path in paths]
     return dict(normal=encoded[0], bold=encoded[1] if len(encoded) > 1 else encoded[0])
 
 
-def render(pages, inline=(), fonts=None):
-    """The finished HTML: template + data + either CDN script tags or inlined libraries."""
+def render(pages, inline=(), fonts=None, meta=None):
+    """The finished HTML: template + data + either CDN script tags or inlined libraries.
+
+    `meta` is the page's provenance (see `provenance`), stamped on the exports; by default
+    just the build time and version.
+    """
     scripts = ('\n'.join(f'<script>{path.read_text()}</script>' for path in inline) if inline
                else '\n'.join(f'<script src="{url}"></script>' for url in CDN))
     if fonts:
         scripts += f'\n<script>window.PB_FONT={json.dumps(fonts)}</script>'
     data = json.dumps(pages, ensure_ascii=False).replace('</', r'<\/')
-    return TEMPLATE.read_text().replace('/*DATA*/', data).replace('<!--SCRIPTS-->', scripts)
+    meta = json.dumps(meta or provenance(), ensure_ascii=False).replace('</', r'<\/')
+    return (TEMPLATE.read_text().replace('/*DATA*/', data).replace('/*META*/', meta)
+            .replace('<!--SCRIPTS-->', scripts))
 
 
 __all__ = ['ROLLUPS', 'REPEATS', 'HIGHER_IS_BETTER', 'CDN', 'VIEWS', 'MIN_POINTS', 'TEMPLATE',
-           'ALIASES', 'NODE_KEYS',
-           'BUDGET_KEYS', 'MARGIN_KEYS', 'normalize', 'walk', 'read_value',
+           'ALIASES', 'NODE_KEYS', 'BUDGET_KEYS', 'MARGIN_KEYS', 'MARGIN_BASES', 'ORIENTATIONS',
+           'normalize', 'walk', 'read_value',
            'make_grid', 'margins', 'read_count', 'describe', 'evaluate', 'derive', 'rounded',
-           'displayed', 'flatten', 'page_views', 'load_budget', 'load_all', 'encode_fonts',
-           'render']
+           'displayed', 'flatten', 'page_views', 'margin_basis', 'load_budget', 'load_all',
+           'provenance', 'encode_fonts', 'render']
